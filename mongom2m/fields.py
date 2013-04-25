@@ -1,11 +1,11 @@
-from djangotoolbox.fields import ListField, DictField, EmbeddedModelField, AbstractIterableField
+# from djangotoolbox.fields import ListField, DictField, EmbeddedModelField, AbstractIterableField
+from django.db import models, router
 from django.db.models.signals import m2m_changed
-from django.db.models import get_model
+# from django.db.models import get_model
 from django.db.models.fields.related import add_lazy_relation
 from django.utils.translation import ugettext_lazy as _
 from django_mongodb_engine.contrib import MongoDBManager
-from django.forms import ModelMultipleChoiceField
-from django.db import models
+# from django.forms import ModelMultipleChoiceField
 
 # How much to show when query set is viewed in the Python shell
 REPR_OUTPUT_SIZE = 20
@@ -24,7 +24,7 @@ class MongoDBM2MQuerySet(object):
     If embed=False, objects are always loaded from database.
     """
     def __init__(self, rel, model, objects, use_cached, appear_as_relationship=(None, None, None, None, None)):
-        self.db = 'default'
+        self.db = router.db_for_read(rel.model if rel.model else rel.field.model)
         self.rel = rel
         self.objects = list(objects) # make a copy of the list to avoid problems
         self.model = model
@@ -172,7 +172,8 @@ class MongoDBM2MRelatedManager(object):
                 Swings and Roundabouts.
         """
         auto_save = kwargs.pop('auto_save', True)
-        using = 'default' # should see if we can carry this over from somewhere
+        using = router.db_for_write(self.model_instance if self.model_instance
+                                                        else self.field.model)
         add_objs = []
         for obj in objs:
             if isinstance(obj, (ObjectId, basestring)):
@@ -190,14 +191,14 @@ class MongoDBM2MRelatedManager(object):
         add_obj_ids = [str(obj['pk']) for obj in add_objs]
         
         # Send pre_add signal (instance should be Through instance but it's the manager instance for now)
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='pre_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids)
+        m2m_changed.send(self.rel.through, instance=self.model_instance, action='pre_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids, using=using)
         
         # Commit the add
         for obj in add_objs:
             self.objects.append({'pk':obj['pk'], 'obj':obj['obj']})
 
         # Send post_add signal (instance should be Through instance but it's the manager instance for now)
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='post_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids)
+        m2m_changed.send(self.rel.through, instance=self.model_instance, action='post_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids, using=using)
 
         if auto_save:
             self.model_instance.save()
@@ -359,7 +360,7 @@ class MongoDBM2MRelatedManager(object):
             values = [values]
         self.objects = [self.to_python_embedded_instance(value) for value in values]
     
-    def get_db_prep_value_embedded_instance(self, obj):
+    def get_db_prep_value_embedded_instance(self, obj, connection, prepared=False):
         """
         Convert an internal object value to database representation.
         """
@@ -375,18 +376,18 @@ class MongoDBM2MRelatedManager(object):
         values = {}
         for field in embedded_instance._meta.fields:
             value = field.pre_save(embedded_instance, add=True)
-            value = field.get_db_prep_value(value)
+            value = field.get_db_prep_value(value, connection=connection, prepared=prepared)
             values[field.column] = value
         # Convert primary key into an ObjectId so it's stored correctly
         values[self.rel.to._meta.pk.column] = ObjectId(values[self.rel.to._meta.pk.column])
         return values
     
-    def get_db_prep_value(self):
+    def get_db_prep_value(self, connection, prepared=False):
         """
         Convert the Django model instances managed by this manager into a special list
         that can be stored in MongoDB.
         """
-        return [self.get_db_prep_value_embedded_instance(obj) for obj in self.objects]
+        return [self.get_db_prep_value_embedded_instance(obj, connection, prepared) for obj in self.objects]
 
 def create_through(field, model, to):
     """
@@ -622,7 +623,7 @@ class MongoDBManyToManyField(models.ManyToManyField):
             # Convert other values to manager objects first
             value = MongoDBM2MRelatedManager(self, self.rel, self.rel.embed, value)
         # Let the manager to the conversion
-        return value.get_db_prep_value()
+        return value.get_db_prep_value(connection, prepared)
     
     def to_python(self, value):
         # The database value is a custom MongoDB list of ObjectIds and embedded models (if embed is enabled).

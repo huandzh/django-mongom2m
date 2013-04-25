@@ -157,11 +157,21 @@ class MongoDBM2MRelatedManager(object):
     def count(self):
         return len(self.objects)
     
-    def add(self, *objs):
+    def add(self, *objs, **kwargs):
         """
         Add model instance(s) to the M2M field. The objects can be real
         Model instances or just ObjectIds (or strings representing ObjectIds).
+
+        Only supported kwarg is 'auto_save'
+        :param auto_save: Defaults to True. When a model is added to the M2M,
+                the behavior of Django is to create an entry in the
+                through-table, which essentially saves the list. In order to do
+                the equivalent, we need to save the model. However, that
+                behavior is not the same as Django either because Django doesn't
+                save the whole model object, so that's why this is optional.
+                Swings and Roundabouts.
         """
+        auto_save = kwargs.pop('auto_save', True)
         using = 'default' # should see if we can carry this over from somewhere
         add_objs = []
         for obj in objs:
@@ -180,32 +190,41 @@ class MongoDBM2MRelatedManager(object):
         add_obj_ids = [str(obj['pk']) for obj in add_objs]
         
         # Send pre_add signal (instance should be Through instance but it's the manager instance for now)
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='pre_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids, using=using)
+        m2m_changed.send(self.rel.through, instance=self.model_instance, action='pre_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids)
         
         # Commit the add
         for obj in add_objs:
             self.objects.append({'pk':obj['pk'], 'obj':obj['obj']})
-        
+
         # Send post_add signal (instance should be Through instance but it's the manager instance for now)
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='post_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids, using=using)
-        
-        return self
-    
-    def create(**kwargs):
+        m2m_changed.send(self.rel.through, instance=self.model_instance, action='post_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids)
+
+        if auto_save:
+            self.model_instance.save()
+
+    def create(self, **kwargs):
         """
         Create new model instance and add to the M2M field.
         """
+        # See add() above for description of auto_save
+        auto_save = kwargs.pop('auto_save', True)
+
         obj = self.rel.to(**kwargs)
-        self.add(obj)
+        self.add(obj, auto_save=auto_save)
         return obj
     
-    def remove(self, *objs):
+    def remove(self, *objs, **kwargs):
         """
         Remove the specified object from the M2M field.
         The object can be a real model instance or an ObjectId or
         a string representing an ObjectId. The related object is
         not deleted, it's only removed from the list.
+
+        Only supported kwarg is 'auto_save'
+        :param auto_save: See add() above for description
         """
+        auto_save = kwargs.pop('auto_save', True)
+
         obj_ids = set([ObjectId(obj) if isinstance(obj, (ObjectId, basestring)) else ObjectId(obj.pk) for obj in objs])
         
         # Calculate list of object ids that will be removed
@@ -219,13 +238,16 @@ class MongoDBM2MRelatedManager(object):
         
         # Send the post_remove signal
         m2m_changed.send(self.rel.through, instance=self.model_instance, action='post_remove', reverse=False, model=self.rel.to, pk_set=removed_obj_ids)
-        
-        return self
-    
-    def clear(self):
+
+        if auto_save:
+            self.model_instance.save()
+
+    def clear(self, auto_save=True):
         """
-        Clear all objecst in the list. The related objects are not
+        Clear all objects in the list. The related objects are not
         deleted from the database.
+
+        :param auto_save: See add() above for description
         """
         # Calculate list of object ids that will be removed
         removed_obj_ids = [str(obj['pk']) for obj in self.objects]
@@ -238,9 +260,10 @@ class MongoDBM2MRelatedManager(object):
         
         # Send the post_clear signal
         m2m_changed.send(self.rel.through, instance=self.model_instance, action='post_clear', reverse=False, model=self.rel.to, pk_set=removed_obj_ids)
+
+        if auto_save:
+            self.model_instance.save()
         
-        return self
-    
     def __contains__(self, obj):
         """
         Helper to enable 'object in container' by comparing IDs.

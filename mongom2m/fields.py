@@ -1,20 +1,24 @@
-# from djangotoolbox.fields import ListField, DictField, EmbeddedModelField, AbstractIterableField
 from django.db import models, router
+from django.db.models import Q
 from django.db.models.signals import m2m_changed
-# from django.db.models import get_model
 from django.db.models.fields.related import add_lazy_relation
 from django.utils.translation import ugettext_lazy as _
+
 from django_mongodb_engine.contrib import MongoDBManager
-# from django.forms import ModelMultipleChoiceField
+from django_mongodb_engine.query import A
+import django_mongodb_engine.query
+try:
+    # ObjectId has been moved to bson.objectid in newer versions of PyMongo
+    from bson.objectid import ObjectId
+except ImportError:
+    from pymongo.objectid import ObjectId
 
 # How much to show when query set is viewed in the Python shell
 REPR_OUTPUT_SIZE = 20
 
-# ObjectId has been moved to bson.objectid in newer versions of PyMongo
-try:
-    from bson.objectid import ObjectId
-except ImportError:
-    from pymongo.objectid import ObjectId
+
+class MongoDBM2MQueryError(Exception): pass
+
 
 class MongoDBM2MQuerySet(object):
     """
@@ -36,7 +40,7 @@ class MongoDBM2MQuerySet(object):
             self.objects = [{'pk':obj['pk'], 'obj':None} for obj in self.objects]
     
     def _get_obj(self, obj):
-        if not obj['obj']:
+        if not obj.get('obj'):
             # Load referred instance from db and keep in memory
             obj['obj'] = self.rel.to.objects.get(pk=obj['pk'])
         if self.appear_as_relationship_model:
@@ -532,6 +536,91 @@ class MongoDBManyToManyRelationDescriptor(object):
         """
         obj.__dict__[self.field.name] = self.field.to_python(value)
 
+    def filter(self, *args, **kwargs):
+        """Enables queries on the host-model-level for contents of this field.
+        That means calling this filter will return instances of the
+        MongoDBManyToManyField host model, not instances of the related model.
+
+        If embed=True, anything can be queried. If embed=False, then only
+        model objects (or ids) can be compared. In this case, the only accepted
+        argument is 'pk'. The reason for this is because related models are
+        stored by pk.
+
+        Warning: Only the first call to this method will actually behave
+                 correctly. If you string multiple calls to filter together, the
+                 remaining filters after the first will all act on the fields
+                 of the host model.
+
+        Example:
+        >>>class M2MModel(models.Model):
+        >>>    name = models.CharField()
+        >>>
+        >>>class Host(models.Model):
+        >>>    m2m = MongoDBManyToManyField(M2MModel, embed=True)
+        >>>
+        >>> m = M2MModel.objects.get(name="foo")
+        >>> Host.m2m.filter(pk=m)
+        [<Host: Host object>]
+        >>> Host.m2m.filter(name="foo")
+        [<Host: Host object>]
+
+        Important Distinction:
+        The above example is acting on the Host model *class*, not instance.
+        Calling filter on an *instance* of Host model would return instances of
+        the M2M related model. Example:
+
+        >>> h = Host.objects.get(id=1)
+        >>> h.m2m.filter(name="foo")
+        [<M2MModel: M2MModel instance>]
+
+        Author's Note:
+        I very much dislike this solution, but a better solution eludes me
+        right now. In order to get the behavior Django has, django-nonrel or
+        djangotoolbox need to be changed to support manytomany fields.
+        """
+        def raise_query_error():
+            raise MongoDBM2MQueryError(
+                "Invalid query paramaters: '%s'. M2M Fields not using the "
+                "'embed=True' option can only filter on 'pk' because only "
+                "the related model's pk is stored for non-embedded M2Ms. "
+                "Note: M2M fields that are converted to 'embed=True' do "
+                "not convert the stored values automatically. Every "
+                "instance of the host-model must be re-saved after "
+                "converting the field." % args, kwargs)
+
+        embedded = self.field._mm2m_embed
+        column = self.field.column
+
+        updated_args = []
+        # Iterate over the arguments and replace them with A objects
+        for field in args:
+            if isinstance(field, Q):
+                # Some args may be Qs. This function replaces the Q children
+                # with A() objects.
+                status = _replace_Q(field, column,
+                                    ["pk"] if not embedded else None)
+                if status:
+                    updated_args.append(field)
+                else:
+                    raise_query_error()
+            else:
+                # Anything else should be tuples of two items
+                updated_args.append(
+                    (self.field.column, _combine_A(field[0], field[1])))
+
+        updated_kwargs = []
+        # Iterate over the kwargs and combine them into A objects
+        for field, value in kwargs.iteritems():
+            if not embedded and field != 'pk':
+                raise_query_error()
+
+            # Have to build Q objects because all the arguments will have the
+            # same key in the kwargs otherwise
+            updated_kwargs.append(Q(**{column: _combine_A(field, value)}))
+
+        return self.field.model.objects.filter(*(updated_args+updated_kwargs))
+
+
 class MongoDBManyToManyRel(object):
     """
     This object holds the information of the M2M relationship.
@@ -588,7 +677,7 @@ class MongoDBManyToManyField(models.ManyToManyField):
         self._mm2m_related_name = related_name
         self._mm2m_embed = embed
         models.Field.__init__(self, *args, **kwargs)
-    
+
     def contribute_after_resolving(self, field, to, model):
         # Setup the main relation helper
         self.rel = MongoDBManyToManyRel(self, to, self._mm2m_related_name, self._mm2m_embed)
@@ -607,15 +696,25 @@ class MongoDBManyToManyField(models.ManyToManyField):
         # Add the relationship descriptor to the model class for Django admin/forms to work
         setattr(model, self.name, MongoDBManyToManyRelationDescriptor(self, self.rel.through))
     
-    def contribute_to_class(self, model, name, *args, **kwargs):
+    def contribute_to_class(self, model, name):
         self.__m2m_name = name
         # Call Field, not super, to skip Django's ManyToManyField extra stuff we don't need
-        models.Field.contribute_to_class(self, model, name, *args, **kwargs)
+        models.Field.contribute_to_class(self, model, name)
         # Do the rest after resolving the 'to' relation
         add_lazy_relation(model, self, self._mm2m_to_or_name, self.contribute_after_resolving)
     
     def db_type(self, *args, **kwargs):
         return 'list'
+
+    def get_db_prep_lookup(self, lookup_type, value, connection,
+                           prepared=False):
+        # This is necessary because the ManyToManyField.get_db_prep_lookup will
+        # convert 'A' objects into a unicode string. We don't want that.
+        if isinstance(value, A):
+            return value
+        else:
+            return super(MongoDBManyToManyField, self).get_db_prep_lookup(
+                                    lookup_type, value, connection, prepared)
     
     def get_db_prep_value(self, value, connection, prepared=False):
         # The Python value is a MongoDBM2MRelatedManager, and we'll store the models it contains as a special list.
@@ -633,6 +732,58 @@ class MongoDBManyToManyField(models.ManyToManyField):
             manager.to_python(value)
             value = manager
         return value
-    
-#    def formfield(self, **kwargs):
-#        return super(MongoDBManyToManyField, self).formfield(**kwargs)
+
+
+def _replace_Q(q, column, allowed_fields=None):
+    if not isinstance(q, Q):
+        raise ValueError("'q' must be of type Q, not: '%s'" % type(q))
+
+    # Iterate over the Q object's children. The children are either another Q,
+    # or a tuple of (<field>,<value>)
+    for child in q.children:
+        if isinstance(child, Q):
+            # If we have a Q in the children, let's recurse to fix it too
+            _replace_Q(child, column, allowed_fields)
+        elif isinstance(child, tuple):
+            # Otherwise we need to build an A(). Doing the index, remove,
+            # and insert to maintain the order of the children. I'm not sure
+            # changing the order matters, but I don't want to risk it.
+            index = q.children.index(child)
+            q.children.remove(child)
+
+            # If allowed_fields is defined, this verifies them. E.g. ['pk']
+            if allowed_fields and child[0] not in allowed_fields:
+                return False
+            # If all is well, build an A(), and insert back into the children
+            q.children.insert(index, (column, _combine_A(child[0], child[1])))
+        else:
+            raise TypeError("Unknown type in Q.children")
+    return True
+
+
+def _combine_A(field, value):
+    # The pk is actually stored as "id", so change it, we also need extract the
+    # pk from and models and wrap any IDs in an ObjectId,
+    if field in ('pk', 'id'):
+        field = "id"
+        if isinstance(value, models.Model):
+            # Specifically getattr field because we don't know if it's 'pk'
+            # or 'id' and they might not be the same thing.
+            value = getattr(value, field)
+        if not isinstance(value, ObjectId):
+            value = ObjectId(value)
+
+    # If 'value' is already an A(), we need to extract the field part out
+    if isinstance(value, A):
+        field = "%s.%s" % (field, value.op)
+        value = value.val
+    return A(field, value)
+
+
+
+# Sort of hackish, but they left me no choice! Without this, 'A' objects are
+# rejected for this field because it's not in "DJANGOTOOLBOX_FIELDS"
+django_mongodb_engine.query.DJANGOTOOLBOX_FIELDS += \
+                                (MongoDBManyToManyField,)
+
+

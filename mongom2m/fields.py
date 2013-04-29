@@ -536,7 +536,7 @@ class MongoDBManyToManyRelationDescriptor(object):
         """
         obj.__dict__[self.field.name] = self.field.to_python(value)
 
-    def filter(self, *args, **kwargs):
+    def _filter_or_exclude(self, negate, *args, **kwargs):
         """Enables queries on the host-model-level for contents of this field.
         That means calling this filter will return instances of the
         MongoDBManyToManyField host model, not instances of the related model.
@@ -580,13 +580,13 @@ class MongoDBManyToManyRelationDescriptor(object):
         """
         def raise_query_error():
             raise MongoDBM2MQueryError(
-                "Invalid query paramaters: '%s'. M2M Fields not using the "
+                "Invalid query paramaters: '%s; %s'. M2M Fields not using the "
                 "'embed=True' option can only filter on 'pk' because only "
                 "the related model's pk is stored for non-embedded M2Ms. "
                 "Note: M2M fields that are converted to 'embed=True' do "
                 "not convert the stored values automatically. Every "
                 "instance of the host-model must be re-saved after "
-                "converting the field." % args, kwargs)
+                "converting the field." % (args, kwargs))
 
         embedded = self.field._mm2m_embed
         column = self.field.column
@@ -618,7 +618,37 @@ class MongoDBManyToManyRelationDescriptor(object):
             # same key in the kwargs otherwise
             updated_kwargs.append(Q(**{column: _combine_A(field, value)}))
 
-        return self.field.model.objects.filter(*(updated_args+updated_kwargs))
+        query_args = updated_args + updated_kwargs
+        if negate:
+            return self.field.model.objects.exclude(*query_args)
+        else:
+            return self.field.model.objects.filter(*query_args)
+
+    def filter(self, *args, **kwargs):
+        """See _filter_or_exclude() above for description"""
+        return self._filter_or_exclude(False, *args, **kwargs)
+
+    def exclude(self, *args, **kwargs):
+        """See _filter_or_exclude() above for description"""
+        return self._filter_or_exclude(True, *args, **kwargs)
+
+    def get(self, *args, **kwargs):
+        """Return a single object matching the query.
+        See _filter_or_exclude() above for more details.
+        """
+        results = self.filter(*args, **kwargs)
+        num = len(results)
+        if num == 1:
+            return results[0]
+        elif num < 1:
+            raise self.field.model.DoesNotExist(
+                            "%s matching query does not exist."
+                            % self.field.model._meta.object_name)
+        else:
+            raise self.field.model.MultipleObjectsReturned(
+                        "get() returned more than one %s -- it returned %s! "
+                        "Lookup parameters were %s"
+                        % (self.field.model._meta.object_name, num, kwargs))
 
 
 class MongoDBManyToManyRel(object):
@@ -770,7 +800,9 @@ def _combine_A(field, value):
             # Specifically getattr field because we don't know if it's 'pk'
             # or 'id' and they might not be the same thing.
             value = getattr(value, field)
-        if not isinstance(value, ObjectId):
+
+        # If value is None, we want to leave it as None, otherwise wrap it
+        if value is not None and not isinstance(value, ObjectId):
             value = ObjectId(value)
 
     # If 'value' is already an A(), we need to extract the field part out

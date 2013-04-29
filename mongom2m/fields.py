@@ -765,6 +765,22 @@ class MongoDBManyToManyField(models.ManyToManyField):
 
 
 def _replace_Q(q, column, allowed_fields=None):
+    """Replace the fields in the Q object with A() objects from 'column'
+
+    :param q: The Q object to work on
+    :param column: The name of the column the A() objects should be attached to.
+    :param allowed_fields: If defined, only fields names listed in
+            'allowed_fields' are allowed.
+            E.g. allowed_fields=["pk"]: Q(pk=1) is good, Q(name="tom") fails.
+    :returns: Boolean; False if 'allowed_fields' missed. True otherwise
+
+    Example:
+     M2M field is called 'users'
+    _replace_Q(Q(name="Tom"), "users") would modify the given Q to be:
+        Q(users=A("name", "Tom"))
+
+    That would generate the query: {"users.name":"Tom"}
+    """
     if not isinstance(q, Q):
         raise ValueError("'q' must be of type Q, not: '%s'" % type(q))
 
@@ -781,7 +797,8 @@ def _replace_Q(q, column, allowed_fields=None):
             index = q.children.index(child)
             q.children.remove(child)
 
-            # If allowed_fields is defined, this verifies them. E.g. ['pk']
+            # If allowed_fields is defined, this verifies that only those
+            # fields are present. E.g. ['pk']
             if allowed_fields and child[0] not in allowed_fields:
                 return False
             # If all is well, build an A(), and insert back into the children

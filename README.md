@@ -1,33 +1,34 @@
 Django MongoDB ManyToManyField Implementation
 =============================================
 
-Created in 2012 by Kenneth Falck <kennu@iki.fi> http://kfalck.net.
+Created in 2012 by Kenneth Falck
+Modified/Extended by Merchant Atlas Inc. 2013
 
 Released under the standard BSD License (see below).
 
 Overview
 --------
 
-This is a simple implementation of ManyToManyFields for django-mongodb-engine. The MongoDBManyToManyField
+This is a simple implementation of ManyToManyFields for django-mongodb-engine. The _MongoDBManyToManyField_
 stores references to other Django model instances as ObjectIds in a MongoDB list field.
 
-Optionally, MongoDBManyToManyField will also embed a "cached" copy of the instances inside the list. This
+Optionally, _MongoDBManyToManyField_ will also embed a "cached" copy of the instances inside the list. This
 allows fast access to the data without having to query each related object from the database separately.
 
-MongoDBManyToManyField attempts to work mostly in the same way as Django's built-in ManyToManyField.
+_MongoDBManyToManyField_ attempts to work mostly in the same way as Django's built-in ManyToManyField.
 Related objects can be added and removed with the add(), remove(), clear() and create() methods.
 
 To enumerate the objects, the all() method returns a simulated QuerySet object which loads non-embedded
 objects automatically from the database when needed.
 
-On the reverse side of the relation, an accessor  property is added (usually called OtherModel.modelname\_set,
+On the reverse side of the relation, an accessor property is added (usually called OtherModel.modelname\_set,
 can be overridden with the related\_name attribute) to return the related objects in the reverse direction.
 It uses MongoDB's raw\_query() to find all related model objects. Because of this, any data model that
 uses MongoDBManyToManyField() must have a default MongoDBManager() instead of Django's normal Manager().
 
 
-Django compability
-------------------
+Django compatibility
+--------------------
 
 This implementation has been tweaked to be mostly compatible with Django admin, which means you can use
 TabularInlines or filter\_horizontal and filter\_vertical to administer the many-to-many fields.
@@ -39,6 +40,7 @@ Don't be surprised, however, if some things don't work, because it's all emulate
 Usage
 -----
 
+### Define a field
 Example model using a many-to-many field:
 
     from django.db import models
@@ -55,31 +57,96 @@ Example model using a many-to-many field:
         title = models.CharField(max_length=254)
         text = models.TextField()
 
+### Add an instance
 To store categories in the field, you would first create the category and then add it:
 
     category = Category(title='foo')
     category.save()
-    
+
     article = Article(title='bar')
     article.categories.add(category)
-    article.save()
-    
+
     for cat in article.categories.all():
         print cat.title
     
     for art in category.article_set.all():
         print art.title
 
+### Basic Querying
+Querying with _MongoDBManyToManyField_ is similar to normal SQL Django, but with some caveats.
+In order to have true Django behavior, we would have had to change some combination of: Django-nonrel,
+Djangotoolbox, and mongodb-engine; so instead, we went a different route.
+
+How Django does it:
+
+    Article.objects.filter(categories=category)
+    [<Article: Article object>, <Article: Article object>]
+
+    article.categories.all()
+    [<Category: Category object>, <Category: Category object>]
+
+How _MongoDBManyToManyField_ does it:
+
+    Article.categories.filter(pk=category)
+    [<Article: Article object>, <Article: Article object>]
+
+    article.categories.all()
+    [<Category: Category object>, <Category: Category object>]
+
+### Embed models for performance and querying
 To enable embedding, just add the embed=True keyword argument to the field:
 
     class Article(models.Model):
-        categories = MongoDBManyToManyField(Category, embed=True)
+        categories = _MongoDBManyToManyField_(Category, embed=True)
+
+**Note about embedding**: If you change a _MongoDBManyToManyField_ from `embed=False` to
+`embed=True` (or vice versa), the host model objects will not be automatically updated.
+You will need to re-save every object of that model.
+Example:
+
+    for article in Article.objects.all():
+        article.save() # Re-saving will now embed the categories automatically
+
+### Advanced Querying (Embedded models)
+If you use `embed=True`, _MongoDBManyToManyField_ can do more than just query on 'pk'.
+You can do any of: get, filter, and exclude; while using Q objects and A objects
+(from mongodb-engine). _MongoDBManyToManyField_ will automatically convert them to
+query correctly on the embedded document.
+Note: The models have to be embedded because MongoDB doesn't support joins.
+
+    Article.categories.filter(title="shirts")
+    Article.categories.filter(Q(title="shirts") | Q(title="hats"))
+    Article.categories.filter(Q(title="shirts") & ~Q(title="men's"))
+
+    # If categories had an embedded model 'em', you could even query it with A()
+    Article.categories.filter(em=A("name", "em1"))
+
+### Limitations
+There are some things that won't work with _MongoDBManyToManyField_:
+#### Chaining multiple filters or excludes together
+
+    # filter(title="hats").exclude(title="") will act on Article, not categories
+    Article.categories.filter(title="shirts").filter(title="hats").exclude(title="")
+    # However, the same can be accomplished with Q objects
+    Article.categories.filter(Q(title="shirts") & Q(title="hats") & ~Q(title=""))
+
+#### Double-underscore commands
+This is actually an issue with djangotoolbox/mongobd-engine. Under the covers,
+_MongoDBManyToManyField_ uses A() objects to generate the queries. Double-underscore
+commands from A() objects don't work.
+
+    # Will query the field 'title__contains', which doesn't exist
+    Article.categories.filter(title__contains="men")
+
+    # Unfortunately, the only solution for this would be to do a raw_query
+    import re
+    Article.objects.raw_query({"categories.title": re.compile("men")})
 
 
 Signals
 -------
 
-MongoDBManyToManyField supports Django's m2m\_changed signal, where the action can be:
+_MongoDBManyToManyField_ supports Django's m2m\_changed signal, where the action can be:
 
 * pre\_add (triggered before adding object(s) to the field)
 * post\_add (triggered after adding object(s) to the field)
@@ -136,8 +203,9 @@ Also make sure that the "id" field is properly indexed (see previous section).
 
 BSD License
 -----------
+Copyright (c) 2013 Merchant Atlas Inc. http://www.merchantatlas.com
 
-Copyright (c) 2012 Kenneth Falck <kennu@iki.fi> http://kfalck.net
+[Original Work] Copyright (c) 2012 Kenneth Falck <kennu@iki.fi> http://kfalck.net
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:

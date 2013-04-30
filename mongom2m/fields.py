@@ -12,6 +12,7 @@ try:
     from bson.objectid import ObjectId
 except ImportError:
     from pymongo.objectid import ObjectId
+from djangotoolbox.fields import ListField, EmbeddedModelField
 
 # How much to show when query set is viewed in the Python shell
 REPR_OUTPUT_SIZE = 20
@@ -27,17 +28,21 @@ class MongoDBM2MQuerySet(object):
     Lazily loads non-embedded objects when iterated.
     If embed=False, objects are always loaded from database.
     """
-    def __init__(self, rel, model, objects, use_cached, appear_as_relationship=(None, None, None, None, None)):
+    def __init__(self, rel, model, objects, use_cached,
+                 appear_as_relationship=(None, None, None, None, None)):
         self.db = router.db_for_read(rel.model if rel.model else rel.field.model)
         self.rel = rel
         self.objects = list(objects) # make a copy of the list to avoid problems
         self.model = model
-        self.appear_as_relationship_model, self.rel_model_instance, self.rel_to_instance, self.rel_model_name, self.rel_to_name = appear_as_relationship # appear as an intermediate m2m model
+        (self.appear_as_relationship_model, self.rel_model_instance,
+                self.rel_to_instance, self.rel_model_name, self.rel_to_name) = \
+                    appear_as_relationship # appear as an intermediate m2m model
         if self.appear_as_relationship_model:
             self.model = self.appear_as_relationship_model
         if not use_cached:
             # Reset any cached instances
-            self.objects = [{'pk':obj['pk'], 'obj':None} for obj in self.objects]
+            self.objects = [{'pk': obj['pk'], 'obj': None}
+                            for obj in self.objects]
     
     def _get_obj(self, obj):
         if not obj.get('obj'):
@@ -46,10 +51,15 @@ class MongoDBM2MQuerySet(object):
         if self.appear_as_relationship_model:
             # Wrap us in a relationship class
             if self.rel_model_instance:
-                args = { 'pk':str(self.rel_model_instance.pk) + '$f$' + str(obj['pk']), self.rel_model_name:self.rel_model_instance, self.rel_to_name:obj['obj'] }
+                args = {'pk': "%s$f$%s" %
+                              (self.rel_model_instance.pk, obj['pk']),
+                        self.rel_model_name: self.rel_model_instance,
+                        self.rel_to_name: obj['obj']}
             else:
                 # Reverse
-                args = { 'pk':str(self.rel_to_instance.pk) + '$r$' + str(obj['pk']), self.rel_model_name:obj['obj'], self.rel_to_name:self.rel_to_instance }
+                args = {'pk': "%s$r$%s" % (self.rel_to_instance.pk, obj['pk']),
+                        self.rel_model_name: obj['obj'],
+                        self.rel_to_name: self.rel_to_instance }
             wrapper = self.appear_as_relationship_model(**args)
             return wrapper
         return obj['obj']
@@ -59,10 +69,11 @@ class MongoDBM2MQuerySet(object):
             yield self._get_obj(obj)
     
     def __repr__(self):
-       data = list(self)[:REPR_OUTPUT_SIZE + 1] # limit list after conversion because mongodb doesn't use integer indices
-       if len(data) > REPR_OUTPUT_SIZE:
+        # limit list after conversion because mongodb doesn't use integer indices
+        data = list(self)[:REPR_OUTPUT_SIZE + 1]
+        if len(data) > REPR_OUTPUT_SIZE:
            data[-1] = "...(remaining elements truncated)..."
-       return repr(data)
+        return repr(data)
     
     def __getitem__(self, key):
         obj = self.objects[key]
@@ -112,12 +123,16 @@ class MongoDBM2MReverseManager(object):
         pk = ObjectId(self.rel_field.pk)
         return self.model._default_manager.raw_query({name:pk})
     
-    def _relationship_query_set(self, model, to_instance, model_module_name, to_module_name):
+    def _relationship_query_set(self, model, to_instance, model_module_name,
+                                to_module_name):
         """
         Emulate an intermediate 'through' relationship query set.
         """
         objects = [{'pk':ObjectId(obj.pk), 'obj':obj} for obj in self.all()]
-        return MongoDBM2MQuerySet(self.rel, self.rel.to, objects, use_cached=True, appear_as_relationship=(model, None, to_instance, model_module_name, to_module_name))
+        return MongoDBM2MQuerySet(
+                self.rel, self.rel.to, objects, use_cached=True,
+                appear_as_relationship=(model, None, to_instance,
+                                        model_module_name, to_module_name))
 
 class MongoDBM2MReverseDescriptor(object):
     def __init__(self, model, field, rel, embed):
@@ -129,7 +144,8 @@ class MongoDBM2MReverseDescriptor(object):
     def __get__(self, instance, owner=None):
         if instance is None:
             return self
-        return MongoDBM2MReverseManager(instance, self.model, self.field, self.rel, self.embed)
+        return MongoDBM2MReverseManager(instance, self.model, self.field,
+                                        self.rel, self.embed)
 
 class MongoDBM2MRelatedManager(object):
     """
@@ -150,7 +166,9 @@ class MongoDBM2MRelatedManager(object):
         Create a new copy of this manager for a specific model instance. This
         is called when the field is being accessed through a model instance.
         """
-        return MongoDBM2MRelatedManager(self.field, self.rel, self.embed, self.objects, model_instance=model_instance)
+        return MongoDBM2MRelatedManager(
+                        self.field, self.rel, self.embed,
+                        self.objects, model_instance=model_instance)
     
     def __call__(self):
         """
@@ -194,15 +212,21 @@ class MongoDBM2MRelatedManager(object):
         # Calculate list of object ids that are being added
         add_obj_ids = [str(obj['pk']) for obj in add_objs]
         
-        # Send pre_add signal (instance should be Through instance but it's the manager instance for now)
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='pre_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids, using=using)
+        # Send pre_add signal (instance should be Through instance but it's the
+        #  manager instance for now)
+        m2m_changed.send(self.rel.through, instance=self.model_instance,
+                         action='pre_add', reverse=False, model=self.rel.to,
+                         pk_set=add_obj_ids, using=using)
         
         # Commit the add
         for obj in add_objs:
             self.objects.append({'pk':obj['pk'], 'obj':obj['obj']})
 
-        # Send post_add signal (instance should be Through instance but it's the manager instance for now)
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='post_add', reverse=False, model=self.rel.to, pk_set=add_obj_ids, using=using)
+        # Send post_add signal (instance should be Through instance but it's
+        # the manager instance for now)
+        m2m_changed.send(self.rel.through, instance=self.model_instance,
+                         action='post_add', reverse=False, model=self.rel.to,
+                         pk_set=add_obj_ids, using=using)
 
         if auto_save:
             self.model_instance.save()
@@ -230,19 +254,24 @@ class MongoDBM2MRelatedManager(object):
         """
         auto_save = kwargs.pop('auto_save', True)
 
-        obj_ids = set([ObjectId(obj) if isinstance(obj, (ObjectId, basestring)) else ObjectId(obj.pk) for obj in objs])
+        obj_ids = set([ObjectId(obj) if isinstance(obj, (ObjectId, basestring))
+                                     else ObjectId(obj.pk) for obj in objs])
         
         # Calculate list of object ids that will be removed
         removed_obj_ids = [str(obj['pk']) for obj in self.objects if obj['pk'] in obj_ids]
         
         # Send the pre_remove signal
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='pre_remove', reverse=False, model=self.rel.to, pk_set=removed_obj_ids)
+        m2m_changed.send(self.rel.through, instance=self.model_instance,
+                         action='pre_remove', reverse=False, model=self.rel.to,
+                         pk_set=removed_obj_ids)
         
         # Commit the remove
         self.objects = [obj for obj in self.objects if obj['pk'] not in obj_ids]
         
         # Send the post_remove signal
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='post_remove', reverse=False, model=self.rel.to, pk_set=removed_obj_ids)
+        m2m_changed.send(self.rel.through, instance=self.model_instance,
+                         action='post_remove', reverse=False, model=self.rel.to,
+                         pk_set=removed_obj_ids)
 
         if auto_save:
             self.model_instance.save()
@@ -258,13 +287,17 @@ class MongoDBM2MRelatedManager(object):
         removed_obj_ids = [str(obj['pk']) for obj in self.objects]
         
         # Send the pre_clear signal
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='pre_clear', reverse=False, model=self.rel.to, pk_set=removed_obj_ids)
+        m2m_changed.send(self.rel.through, instance=self.model_instance,
+                         action='pre_clear', reverse=False, model=self.rel.to,
+                         pk_set=removed_obj_ids)
         
         # Commit the clear
         self.objects = []
         
         # Send the post_clear signal
-        m2m_changed.send(self.rel.through, instance=self.model_instance, action='post_clear', reverse=False, model=self.rel.to, pk_set=removed_obj_ids)
+        m2m_changed.send(self.rel.through, instance=self.model_instance,
+                         action='post_clear', reverse=False, model=self.rel.to,
+                         pk_set=removed_obj_ids)
 
         if auto_save:
             self.model_instance.save()
@@ -293,7 +326,8 @@ class MongoDBM2MRelatedManager(object):
         is enabled, returns embedded objects. Otherwise the query set
         will retrieve the objects from the database as needed.
         """
-        return MongoDBM2MQuerySet(self.rel, self.rel.to, self.objects, use_cached=True, **kwargs)
+        return MongoDBM2MQuerySet(self.rel, self.rel.to, self.objects,
+                                  use_cached=True, **kwargs)
     
     def ids(self):
         """
@@ -307,7 +341,8 @@ class MongoDBM2MRelatedManager(object):
         the database. This won't use embedded objects even if they
         exist.
         """
-        return MongoDBM2MQuerySet(self.rel, self.rel.to, self.objects, use_cached=False)
+        return MongoDBM2MQuerySet(self.rel, self.rel.to, self.objects,
+                                  use_cached=False)
     
     def to_python_embedded_instance(self, embedded_instance):
         """
@@ -316,10 +351,27 @@ class MongoDBM2MRelatedManager(object):
         """
         if isinstance(embedded_instance, ObjectId):
             # It's an object id, probably from a ListField(ForeignKey) migration
-            return {'pk':embedded_instance, 'obj':None}
+            return {'pk': embedded_instance, 'obj': None}
         elif isinstance(embedded_instance, basestring):
-            # Assume it's a string formatted object id, probably from a ListField(ForeignKey) migration
-            return {'pk':ObjectId(embedded_instance), 'obj':None}
+            # Assume it's a string formatted object id, probably from a
+            # ListField(ForeignKey) migration
+            return {'pk': ObjectId(embedded_instance), 'obj': None}
+
+        elif isinstance(embedded_instance, tuple):
+            # This is the typical path for embedded instances (embed=True)
+            # The tuples is format: (<embedded model class>, <kwarg dict>)
+            cls, values = embedded_instance
+            if len(values) == 1 and 'id' in values and \
+                        len(cls._meta.fields) > 1:
+                # In this case, the user most likely just switched from
+                # embed=False to embed=True. We need to treat is as such
+                return self.to_python_embedded_instance(
+                                {"id": ObjectId(values['id'])})
+            else:
+                # Otherwise it's been embedded previously
+                instance = cls(**values)
+                return {'pk': ObjectId(instance.pk), 'obj': instance}
+
         elif self.embed:
             # Try to load the embedded object contents if possible
             if isinstance(embedded_instance, dict):
@@ -327,33 +379,42 @@ class MongoDBM2MRelatedManager(object):
                 data = {}
                 for field in self.rel.to._meta.fields:
                     try:
-                        data[str(field.attname)] = embedded_instance[field.column]
+                        data[str(field.attname)] = \
+                                                embedded_instance[field.column]
                     except KeyError:
                         pass
-                # If we only got the id, give up to avoid creating an invalid/empty model instance
+
+                # If we only got the id, give up to avoid creating an
+                # invalid/empty model instance
                 if len(data) <= 1:
-                    return {'pk':ObjectId(embedded_instance[self.rel.to._meta.pk.column]), 'obj':None}
-                # Otherwise create the model instance from the fields
-                obj = self.rel.to(**data)
-                # Make sure the pk in the model instance is a string (not ObjectId) to be compatible with django-mongodb-engine
-                if isinstance(obj.pk, ObjectId):
-                    obj.pk = str(obj.pk)
-                return {'pk':ObjectId(obj.pk), 'obj':obj}
+                    column = self.rel.to._meta.pk.column
+                    return {'pk': ObjectId(embedded_instance[column]),
+                            'obj': None}
+                else:
+                    # Otherwise create the model instance from the fields
+                    obj = self.rel.to(**data)
+                    # Make sure the pk in the model instance is a string
+                    # (not ObjectId) to be compatible with django-mongodb-engine
+                    if isinstance(obj.pk, ObjectId):
+                        obj.pk = str(obj.pk)
+                    return {'pk': ObjectId(obj.pk), 'obj': obj}
             else:
                 # Assume it's already a model
                 obj = embedded_instance
-                # Make sure the pk is a string (not ObjectId) to be compatible with django-mongodb-engine
+                # Make sure the pk is a string (not ObjectId) to be compatible
+                # with django-mongodb-engine
                 if isinstance(obj.pk, ObjectId):
                     obj.pk = str(obj.pk)
-                return {'pk':ObjectId(obj.pk), 'obj':obj}
+                return {'pk': ObjectId(obj.pk), 'obj': obj}
         else:
             # No embedded value, only ObjectId
             if isinstance(embedded_instance, dict):
                 # Get the id value from the dict
-                return {'pk':ObjectId(embedded_instance[self.rel.to._meta.pk.column]), 'obj':None}
+                column = self.rel.to._meta.pk.column
+                return {'pk': ObjectId(embedded_instance[column]), 'obj': None}
             else:
                 # Assume it's already a model
-                return {'pk':ObjectId(embedded_instance.pk), 'obj':None}
+                return {'pk': ObjectId(embedded_instance.pk), 'obj': None}
     
     def to_python(self, values):
         """
@@ -364,34 +425,37 @@ class MongoDBM2MRelatedManager(object):
             values = [values]
         self.objects = [self.to_python_embedded_instance(value) for value in values]
     
-    def get_db_prep_value_embedded_instance(self, obj, connection, prepared=False):
+    def get_db_prep_value_embedded_instance(self, obj, connection):
         """
         Convert an internal object value to database representation.
         """
         if not obj: return None
         pk = obj['pk']
         if not self.embed:
-            # Store only the ID
-            return { self.rel.to._meta.pk.column:pk }
+            # If we're not embedding, store only the ID
+            return {self.rel.to._meta.pk.column: pk}
         if not obj['obj']:
             # Retrieve the object from db for storing as embedded data
             obj['obj'] = self.rel.to.objects.get(pk=pk)
         embedded_instance = obj['obj']
         values = {}
+
         for field in embedded_instance._meta.fields:
             value = field.pre_save(embedded_instance, add=True)
-            value = field.get_db_prep_value(value, connection=connection, prepared=prepared)
-            values[field.column] = value
+            value = field.get_db_prep_save(value, connection=connection)
+            values[field] = value
         # Convert primary key into an ObjectId so it's stored correctly
-        values[self.rel.to._meta.pk.column] = ObjectId(values[self.rel.to._meta.pk.column])
+        # values[self.rel.to._meta.pk] = ObjectId(values[self.rel.to._meta.pk])
         return values
     
     def get_db_prep_value(self, connection, prepared=False):
+        """Convert the Django model instances managed by this manager into a
+        special list that can be stored in MongoDB.
         """
-        Convert the Django model instances managed by this manager into a special list
-        that can be stored in MongoDB.
-        """
-        return [self.get_db_prep_value_embedded_instance(obj, connection, prepared) for obj in self.objects]
+        values = [self.get_db_prep_value_embedded_instance(obj, connection)
+                  for obj in self.objects]
+        return values
+
 
 def create_through(field, model, to):
     """
@@ -531,8 +595,8 @@ class MongoDBManyToManyRelationDescriptor(object):
     
     def __set__(self, obj, value):
         """
-        Attributes are being assigned to model instance. We redirect the assignments
-        to the model instance's fields instances.
+        Attributes are being assigned to model instance. We redirect the
+        assignments to the model instance's fields instances.
         """
         obj.__dict__[self.field.name] = self.field.to_python(value)
 
@@ -669,14 +733,13 @@ class MongoDBManyToManyRel(object):
         self.multiple = True
         self.limit_choices_to = {}
     
-    
     def is_hidden(self):
         return False
     
     def get_related_field(self, *args, **kwargs):
         return self.field
 
-class MongoDBManyToManyField(models.ManyToManyField):
+class MongoDBManyToManyField(models.ManyToManyField, ListField):
     """
     A generic MongoDB many-to-many field that can store embedded copies of
     the referenced objects. Inherits from djangotoolbox.fields.ListField.
@@ -701,40 +764,76 @@ class MongoDBManyToManyField(models.ManyToManyField):
     """
     description = 'ManyToMany field with references and optional embedded objects'
     
-    def __init__(self, to, related_name=None, embed=False, default=None, *args, **kwargs):
-        # Call Field, not super, to skip Django's ManyToManyField extra stuff we don't need
+    def __init__(self, to, related_name=None, embed=False, *args, **kwargs):
+        # Call Field, not super, to skip Django's ManyToManyField extra stuff
+        # we don't need
         self._mm2m_to_or_name = to
         self._mm2m_related_name = related_name
         self._mm2m_embed = embed
-        models.Field.__init__(self, *args, **kwargs)
+        if embed:
+            item_field = EmbeddedModelField(to)
+        else:
+            item_field = None
+        ListField.__init__(self, item_field, *args, **kwargs)
 
     def contribute_after_resolving(self, field, to, model):
         # Setup the main relation helper
-        self.rel = MongoDBManyToManyRel(self, to, self._mm2m_related_name, self._mm2m_embed)
-        # The field's default value will be an empty MongoDBM2MRelatedManager that's not connected to a model instance
-        self.default = MongoDBM2MRelatedManager(self, self.rel, self._mm2m_embed)
+        self.rel = MongoDBManyToManyRel(self, to, self._mm2m_related_name,
+                                        self._mm2m_embed)
+        # The field's default value will be an empty MongoDBM2MRelatedManager
+        # that's not connected to a model instance
+        self.default = MongoDBM2MRelatedManager(self, self.rel,
+                                                self._mm2m_embed)
         self.rel.model = model
         self.rel.through = create_through(self, self.rel.model, self.rel.to)
         # Determine related name automatically unless set
         if not self.rel.related_name:
             self.rel.related_name = model._meta.object_name.lower() + '_set'
-        #if hasattr(self.rel.to, self.rel.related_name):
-        #    # Attribute name already taken, raise error
-        #    raise Exception(u'Related name ' + unicode(self.rel.to._meta.object_name) + u'.' + unicode(self.rel.related_name) + u' is already used by another field, please choose another name with ' + unicode(name) + u' = ' + unicode(self.__class__.__name__) + u'(related_name=xxx)')
+
         # Add the reverse relationship
-        setattr(self.rel.to, self.rel.related_name, MongoDBM2MReverseDescriptor(model, self, self.rel, self.rel.embed))
-        # Add the relationship descriptor to the model class for Django admin/forms to work
-        setattr(model, self.name, MongoDBManyToManyRelationDescriptor(self, self.rel.through))
+        setattr(self.rel.to, self.rel.related_name,
+                MongoDBM2MReverseDescriptor(model, self, self.rel,
+                                            self.rel.embed))
+        # Add the relationship descriptor to the model class for Django
+        # admin/forms to work
+        setattr(model, self.name,
+                MongoDBManyToManyRelationDescriptor(self, self.rel.through))
     
     def contribute_to_class(self, model, name):
         self.__m2m_name = name
-        # Call Field, not super, to skip Django's ManyToManyField extra stuff we don't need
-        models.Field.contribute_to_class(self, model, name)
+        # Call Field, not super, to skip Django's ManyToManyField extra stuff
+        # we don't need
+        ListField.contribute_to_class(self, model, name)
         # Do the rest after resolving the 'to' relation
-        add_lazy_relation(model, self, self._mm2m_to_or_name, self.contribute_after_resolving)
+        add_lazy_relation(model, self, self._mm2m_to_or_name,
+                          self.contribute_after_resolving)
     
     def db_type(self, *args, **kwargs):
         return 'list'
+
+    def get_internal_type(self):
+        return 'ListField'
+
+    def formfield(self, **kwargs):
+        from django import forms
+        db = kwargs.pop('using', None)
+        defaults = {
+            'form_class': forms.ModelMultipleChoiceField,
+            'queryset': self.rel.to._default_manager.using(db).complex_filter(
+                self.rel.limit_choices_to)
+        }
+        defaults.update(kwargs)
+        # If initial is passed in, it's a list of related objects, but the
+        # MultipleChoiceField takes a list of IDs.
+        if defaults.get('initial') is not None:
+            initial = defaults['initial']
+            if callable(initial):
+                initial = initial()
+            defaults['initial'] = [i._get_pk_val() for i in initial]
+        return models.Field.formfield(self, **defaults)
+
+    def pre_save(self, model_instance, add):
+        return self.to_python(getattr(model_instance, self.attname))
 
     def get_db_prep_lookup(self, lookup_type, value, connection,
                            prepared=False):
@@ -743,20 +842,23 @@ class MongoDBManyToManyField(models.ManyToManyField):
         if isinstance(value, A):
             return value
         else:
-            return super(MongoDBManyToManyField, self).get_db_prep_lookup(
-                                    lookup_type, value, connection, prepared)
-    
+            return models.ManyToManyField.get_db_prep_lookup(
+                        self, lookup_type, value, connection, prepared)
+
     def get_db_prep_value(self, value, connection, prepared=False):
-        # The Python value is a MongoDBM2MRelatedManager, and we'll store the models it contains as a special list.
+        # The Python value is a MongoDBM2MRelatedManager, and we'll store the
+        #  models it contains as a special list.
         if not isinstance(value, MongoDBM2MRelatedManager):
             # Convert other values to manager objects first
-            value = MongoDBM2MRelatedManager(self, self.rel, self.rel.embed, value)
+            value = MongoDBM2MRelatedManager(self, self.rel,
+                                             self.rel.embed, value)
         # Let the manager to the conversion
         return value.get_db_prep_value(connection, prepared)
     
     def to_python(self, value):
-        # The database value is a custom MongoDB list of ObjectIds and embedded models (if embed is enabled).
-        # We convert it into a MongoDBM2MRelatedManager object to hold the Django models.
+        # The database value is a custom MongoDB list of ObjectIds and embedded
+        # models (if embed is enabled). We convert it into a
+        # MongoDBM2MRelatedManager object to hold the Django models.
         if not isinstance(value, MongoDBM2MRelatedManager):
             manager = MongoDBM2MRelatedManager(self, self.rel, self.rel.embed)
             manager.to_python(value)

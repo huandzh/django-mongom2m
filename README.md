@@ -44,7 +44,7 @@ Usage
 Example model using a many-to-many field:
 
     from django.db import models
-    from mongom2m.fields import MongoDBManyToManyField
+    from django_mongom2m.fields import MongoDBManyToManyField
     from django_mongodb_engine.contrib import MongoDBManager
     
     class Category(models.Model):

@@ -1,8 +1,7 @@
 Django MongoDB ManyToManyField Implementation
 =============================================
 
-Created in 2012 by Kenneth Falck
-Modified/Extended by Merchant Atlas Inc. 2013
+Created in 2012 by Kenneth Falck, Modified/Extended by Merchant Atlas Inc. 2013
 
 Released under the standard BSD License (see below).
 
@@ -93,7 +92,7 @@ How _MongoDBManyToManyField_ does it:
     article.categories.all()
     [<Category: Category object>, <Category: Category object>]
 
-### Embed models for performance and querying
+### Embed Models for Performance and Querying
 To enable embedding, just add the embed=True keyword argument to the field:
 
     class Article(models.Model):
@@ -124,6 +123,9 @@ Note: The models have to be embedded because MongoDB doesn't support joins.
 ### Limitations
 There are some things that won't work with _MongoDBManyToManyField_:
 #### Chaining multiple filters or excludes together
+Under the covers, the initial filter is being called on the Article QuerySet, so what
+gets returned is an Article QuerySet. That means calling filter() again will not get 
+any of the magic provided by _MongoDBManyToManyField_.
 
     # filter(title="hats").exclude(title="") will act on Article, not categories
     Article.categories.filter(title="shirts").filter(title="hats").exclude(title="")

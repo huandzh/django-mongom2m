@@ -1,8 +1,8 @@
 from django.db import models
 from django.db.models.fields.related import add_lazy_relation
+from django.db.models.query_utils import DeferredAttribute
 from django_mongodb_engine.query import A
 from djangotoolbox.fields import ListField, EmbeddedModelField
-
 
 from .manager import (MongoDBManyToManyRel, MongoDBM2MRelatedManager,
                       MongoDBM2MReverseDescriptor,
@@ -130,7 +130,9 @@ class MongoDBManyToManyField(models.ManyToManyField, ListField):
         # The database value is a custom MongoDB list of ObjectIds and embedded
         # models (if embed is enabled). We convert it into a
         # MongoDBM2MRelatedManager object to hold the Django models.
-        if not isinstance(value, MongoDBM2MRelatedManager):
+
+        if not isinstance(value, MongoDBM2MRelatedManager) and \
+           not isinstance(value, DeferredAttribute):
             manager = MongoDBM2MRelatedManager(self, self.rel, self.rel.embed)
             manager.to_python(value)
             value = manager

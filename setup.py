@@ -2,7 +2,7 @@ from distutils.core import setup
 
 setup(
     name='django-mongom2m',
-    version='0.2.1',
+    version='0.2.2',
     author=u'Merchant Atlas Inc.',
     author_email='support@merchantatlas.com',
     packages=['django_mongom2m'],

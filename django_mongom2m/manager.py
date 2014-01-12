@@ -278,6 +278,9 @@ class MongoDBM2MRelatedManager(object):
                 return self.to_python_embedded_instance(
                                 {"id": ObjectId(values['id'])})
             else:
+                if isinstance(values, tuple):
+                    # In some versions of django-toolbox, 'values' is a tuple.
+                    values = dict(values)
                 # Otherwise it's been embedded previously
                 instance = cls(**values)
                 return {'pk': ObjectId(instance.pk), 'obj': instance}
@@ -328,12 +331,14 @@ class MongoDBM2MRelatedManager(object):
 
     def to_python(self, values):
         """
-        Convert a database value to Django model instances managed by this manager.
+        Convert a database value to Django model instances managed by this
+        manager.
         """
         if isinstance(values, models.Model):
             # Single value given as parameter
             values = [values]
-        self.objects = [self.to_python_embedded_instance(value) for value in values]
+        self.objects = [self.to_python_embedded_instance(value)
+                        for value in values]
 
     def get_db_prep_value_embedded_instance(self, obj, connection):
         """

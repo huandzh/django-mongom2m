@@ -116,15 +116,15 @@ class MongoDBManyToManyField(models.ManyToManyField, ListField):
             return models.ManyToManyField.get_db_prep_lookup(
                         self, lookup_type, value, connection, prepared)
 
-    #def get_db_prep_value(self, value, connection, prepared=False):
-    #    # The Python value is a MongoDBM2MRelatedManager, and we'll store the
-    #    #  models it contains as a special list.
-    #    if not isinstance(value, MongoDBM2MRelatedManager):
-    #        # Convert other values to manager objects first
-    #        value = MongoDBM2MRelatedManager(self, self.rel,
-    #                                         self.rel.embed, value)
-    #    # Let the manager to the conversion
-    #    return value.get_db_prep_value(connection, prepared)
+    def get_db_prep_value(self, value, connection, prepared=False):
+        # The Python value is a MongoDBM2MRelatedManager, and we'll store the
+        #  models it contains as a special list.
+        if not isinstance(value, MongoDBM2MRelatedManager):
+            # Convert other values to manager objects first
+            value = MongoDBM2MRelatedManager(self, self.rel,
+                                             self.rel.embed, value)
+        # Let the manager to the conversion
+        return value.get_db_prep_value(connection, prepared)
 
     def get_db_prep_save(self, value, connection, prepared=False):
         # The Python value is a MongoDBM2MRelatedManager, and we'll store the

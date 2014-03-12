@@ -2,6 +2,7 @@
 from django.db import models, router
 from django.db.models import Q
 from django.db.models.signals import m2m_changed
+from django.db.models.deletion import DO_NOTHING
 try:
     # ObjectId has been moved to bson.objectid in newer versions of PyMongo
     from bson.objectid import ObjectId
@@ -530,6 +531,7 @@ class MongoDBManyToManyRel(object):
     It's accessed by Django admin/forms in various contexts, and we also
     use it internally. We try to simulate what's needed by Django.
     """
+    on_delete = DO_NOTHING
     def __init__(self, field, to, related_name, embed):
         self.model = None # added later from contribute_to_class
         self.through = None # added later from contribute_to_class

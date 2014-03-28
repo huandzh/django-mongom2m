@@ -540,6 +540,7 @@ class MongoDBManyToManyRel(object):
         self.related_name = related_name
         self.embed = embed
         self.field_name = self.to._meta.pk.name
+        self.parent_link = False
         # Required for Django admin/forms to work.
         self.multiple = True
         self.limit_choices_to = {}

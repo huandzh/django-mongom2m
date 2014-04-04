@@ -125,7 +125,10 @@ class MongoDBManyToManyField(models.ManyToManyField, ListField):
                                              self.rel.embed, value)
         # Let the manager to the conversion
         return value.get_db_prep_value(connection, prepared)
-    
+
+    def get_db_prep_save(self, value, connection):
+        return self.get_db_prep_value(value, connection)
+
     def to_python(self, value):
         # The database value is a custom MongoDB list of ObjectIds and embedded
         # models (if embed is enabled). We convert it into a

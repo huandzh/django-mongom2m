@@ -93,3 +93,10 @@ class MongoDBM2MQuerySet(object):
 
     def count(self):
         return len(self.objects)
+
+    def values_list(self, pk, *args, **kwargs):
+        ret = []
+        for obj in self.objects:
+            ret.append(self._get_obj(obj))
+        return ret
+

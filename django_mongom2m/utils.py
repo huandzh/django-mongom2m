@@ -108,8 +108,9 @@ def create_through(field, model, to):
     Through.__name__ = obj_name
     Through._meta.app_label = model._meta.app_label
     Through._meta.object_name = obj_name
-    Through._meta.module_name = obj_name.lower()
-    Through._meta.db_table = Through._meta.app_label + '_' + Through._meta.module_name
+    #.model_name is used instead of .module_name since 1.6
+    Through._meta.model_name = obj_name.lower()
+    Through._meta.db_table = Through._meta.app_label + '_' + Through._meta.model_name
     Through._meta.verbose_name = _('%(model)s %(to)s relationship') % {'model':model._meta.verbose_name, 'to':to._meta.verbose_name}
     Through._meta.verbose_name_plural = _('%(model)s %(to)s relationships') % {'model':model._meta.verbose_name, 'to':to._meta.verbose_name}
     # Add new model to Django's model registry

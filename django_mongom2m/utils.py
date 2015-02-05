@@ -45,6 +45,11 @@ def create_through(field, model, to):
             return self
         def exists(self, *args, **kwargs):
             return False
+        def none(self, *args, **kwargs):
+            if self.filter() != self:
+                return self.filter().none()
+            else:
+                return self
         def ordered(self, *args, **kwargs):
             return self
         def using(self, db, *args, **kwargs):

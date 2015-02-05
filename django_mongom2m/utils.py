@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, router
 from django.db.models import Q
 from django.utils.translation import ugettext_lazy as _
 from django_mongodb_engine.contrib import MongoDBManager
@@ -27,7 +27,8 @@ def create_through(field, model, to):
             self.model_instance = None
             self.related_manager = None
             self.to_instance = None
-            self.db = 'default'
+            #avoiding using backends other than django-mongodb-engine
+            self.db = router.db_for_write(self.model)
         def filter(self, *args, **kwargs):
             if model_module_name in kwargs:
                 # Relation, set up for querying by the model

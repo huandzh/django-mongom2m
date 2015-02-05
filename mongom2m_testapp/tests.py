@@ -1,11 +1,15 @@
 from django.test import TestCase
 from django.db import models
 from django.db.models.signals import m2m_changed
-from mongom2m.fields import MongoDBManyToManyField
+from django_mongom2m.fields import MongoDBManyToManyField
 from django_mongodb_engine.contrib import MongoDBManager
 from djangotoolbox.fields import ListField, EmbeddedModelField
 from models import TestArticle, TestCategory, TestTag, TestAuthor, TestBook#, TestOldArticle, TestOldEmbeddedArticle
-from pymongo.objectid import ObjectId
+try:
+    # ObjectId has been moved to bson.objectid in newer versions of PyMongo
+    from bson.objectid import ObjectId
+except ImportError:
+    from pymongo.objectid import ObjectId
 import sys
 
 class MongoDBManyToManyFieldTest(TestCase):
@@ -101,10 +105,10 @@ class MongoDBManyToManyFieldTest(TestCase):
         
         old_article = TestOldArticle(title='old article 1', text='old article text 1', main_category=category1, categories=[category1.id, category2.id], tags=[tag1.id, tag2.id])
         old_article.save()
-        
+
         # Now use the new model to access the old data.
         new_article = TestArticle.objects.get(title='old article 1')
-        
+
         # Make sure the fields were loaded correctly
         self.assertEqual(set(cat.title for cat in new_article.categories.all()), set(('test cat 1', 'test cat 2')))
         self.assertEqual(set(cat.id for cat in new_article.categories.all()), set((category1.id, category2.id)))

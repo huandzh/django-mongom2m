@@ -36,8 +36,13 @@ class MongoDBM2MQuerySet(object):
 
     def _get_obj(self, obj):
         if not obj.get('obj'):
-            # Load referred instance from db and keep in memory
-            obj['obj'] = self.rel.to.objects.get(pk=obj['pk'])
+            try:
+                # Load referred instance from db and keep in memory
+                obj['obj'] = self.rel.to.objects.get(pk=obj['pk'])
+            except self.rel.to.DoesNotExist:
+                # cheap clean : throw away obj which is not in db
+                # Note : obj has a unique pk in the same mongodb instance
+                self.objects.remove(obj)
         if self.appear_as_relationship_model:
             # Wrap us in a relationship class
             if self.rel_model_instance:
@@ -138,13 +143,21 @@ class MongoDBM2MValuesListQuerySet(MongoDBM2MQuerySet):
         iterator yield only fields requested
         '''
         if self.flat and len(self._fields) == 1:
-            for obj in self.objects:
-                yield obj['obj'].__getattribute__(self._fields[0])
+            field = self._fields[0]
+            if field == 'pk':
+                for obj in self.objects:
+                    yield obj['pk']
+            else:
+                for obj in self.objects:
+                    if hasattr(obj, self._fields[0]):
+                        yield obj['obj'].__getattribute__(self._fields[0])
+                    else:
+                        yield None
         else:
             for obj in self.objects():
                 row = list()
                 for field in self._fields:
-                    if hasattr(field, obj):
+                    if hasattr(obj, field):
                         row.append(obj['obj'].__getattribute__(field))
                     else:
                         row.append(None)

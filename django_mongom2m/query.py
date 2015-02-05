@@ -138,23 +138,27 @@ class MongoDBM2MValuesListQuerySet(MongoDBM2MQuerySet):
         iterator yield only fields requested
         '''
         if self.flat and len(self._fields) == 1:
-            for obj in self.objs:
-                yield obj.__getattribute__(self._fields[0])
+            for obj in self.objects:
+                yield obj['obj'].__getattribute__(self._fields[0])
         else:
-            for obj in self.objs:
+            for obj in self.objects():
                 row = list()
                 for field in self._fields:
                     if hasattr(field, obj):
-                        row.append(obj.__getattribute__(field))
+                        row.append(obj['obj'].__getattribute__(field))
                     else:
                         row.append(None)
                 yield tuple(row)
+
+    def __iter__(self):
+        for item in self.iterator():
+            yield item
 
     def _clone(self, *args, **kwargs):
         '''
         override MongoDBM2MQuerySet._clone, clone this query set
         '''
-        clone = super(ValuesListQuerySet, self)._clone(*args, **kwargs)
+        clone = super(MongoDBM2MValuesListQuerySet, self)._clone(*args, **kwargs)
         if not hasattr(clone, "flat"):
             # Only assign flat if the clone didn't already get it from kwargs
             clone.flat = self.flat

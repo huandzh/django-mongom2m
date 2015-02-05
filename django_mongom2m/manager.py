@@ -533,6 +533,8 @@ class MongoDBManyToManyRel(object):
     def __init__(self, field, to, related_name, embed):
         self.model = None # added later from contribute_to_class
         self.through = None # added later from contribute_to_class
+        #for django.core.management.validation
+        self.related_query_name = None
         self.field = field
         self.to = to
         self.related_name = related_name

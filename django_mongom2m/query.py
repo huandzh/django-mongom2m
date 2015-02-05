@@ -93,3 +93,69 @@ class MongoDBM2MQuerySet(object):
 
     def count(self):
         return len(self.objects)
+
+    def _clone(self, klass=None, setup=False, **kwargs):
+        '''
+        return a clone of self queryset
+        works similar to django.db.models.query.QuerySet.clone
+        '''
+        if klass is None:
+            klass = self.__class__
+        objects = list(self.objects)
+        c = klass(rel=self.rel, model=self.model, objects=objects,
+                  use_cached=True,
+                  appear_as_relationship=(
+                      self.appear_as_relationship_model,
+                      self.rel_model_instance,
+                      self.rel_to_instance,
+                      self.rel_model_name, self.rel_to_name)
+              )
+        c.__dict__.update(kwargs)
+        #no use for now
+        if setup and hasattr(c, '_setup_query'):
+            c._setup_query()
+        return c
+
+    def values_list(self, *fields, **kwargs):
+        '''
+        required by django.contrib.admin
+        '''
+        flat = kwargs.pop('flat', False)
+        if kwargs:
+            raise TypeError('Unexpected keyword arguments to values_list: %s'
+                    % (list(kwargs),))
+        if flat and len(fields) > 1:
+            raise TypeError("'flat' is not valid when values_list is called with more than one field.")
+        return self._clone(klass=MongoDBM2MValuesListQuerySet, setup=True, flat=flat,
+                _fields=fields)
+
+class MongoDBM2MValuesListQuerySet(MongoDBM2MQuerySet):
+    '''
+    simulate ValuesListQuerySet, using objects instead of query
+    '''
+    def iterator(self):
+        '''
+        iterator yield only fields requested
+        '''
+        if self.flat and len(self._fields) == 1:
+            for obj in self.objs:
+                yield obj.__getattribute__(self._fields[0])
+        else:
+            for obj in self.objs:
+                row = list()
+                for field in self._fields:
+                    if hasattr(field, obj):
+                        row.append(obj.__getattribute__(field))
+                    else:
+                        row.append(None)
+                yield tuple(row)
+
+    def _clone(self, *args, **kwargs):
+        '''
+        override MongoDBM2MQuerySet._clone, clone this query set
+        '''
+        clone = super(ValuesListQuerySet, self)._clone(*args, **kwargs)
+        if not hasattr(clone, "flat"):
+            # Only assign flat if the clone didn't already get it from kwargs
+            clone.flat = self.flat
+        return clone

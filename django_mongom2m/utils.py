@@ -77,11 +77,27 @@ def create_through(field, model, to):
             # Normal key
             return None
         def __len__(self):
-            # Won't work, must be accessed through filter()
-            raise Exception('ThroughQuerySet relation unknown (__len__)')
+            '''
+            hack: return 0 if filter is not ready, else using filter().__len__
+            '''
+            if self.filter() != self:
+                return self.filter().__len__()
+            else:
+                return 0
         def __getitem__(self, key):
-            # Won't work, must be accessed through filter()
-            raise Exception('ThroughQuerySet relation unknown (__getitem__)')
+            '''
+            hack: admin site will try __getitem___ but only catch IndexError
+            raise IndexError if filter is not ready,
+            else using filter().__getitem___
+            '''
+            if self.filter() != self:
+                import ipdb;ipdb.set_trace()
+                return self.filter().__getitem__(key)
+            else:
+                # Won't work, must be accessed through filter()
+                # hack: raise as IndexError for admin
+                raise IndexError('ThroughQuerySet relation unknown (__getitem__)')
+
     class ThroughManager(MongoDBManager):
         def get_query_set(self):
             return ThroughQuerySet(self.model)

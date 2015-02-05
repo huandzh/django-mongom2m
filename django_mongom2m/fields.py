@@ -115,6 +115,15 @@ class MongoDBManyToManyField(models.ManyToManyField, ListField):
     def pre_save(self, model_instance, add):
         return self.to_python(getattr(model_instance, self.attname))
 
+    #get_db_prep_save changed for ListField from djangotoolbox 1.6.2
+    #using Field.get_db_prep_save which is compitable
+    def get_db_prep_save(self, value, connection):
+        """
+        Returns field's value prepared for saving into a database.
+        """
+        return self.get_db_prep_value(value, connection=connection,
+                                      prepared=False)
+
     def get_db_prep_lookup(self, lookup_type, value, connection,
                            prepared=False):
         # This is necessary because the ManyToManyField.get_db_prep_lookup will

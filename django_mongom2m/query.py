@@ -34,8 +34,8 @@ class MongoDBM2MQuerySet(object):
             self.objects = [{'pk': obj['pk'], 'obj': None}
                             for obj in self.objects]
 
-    def _get_obj(self, obj):
-        if not obj.get('obj'):
+    def _get_obj(self, obj, force_load=False):
+        if force_load or (not obj.get('obj')):
             try:
                 # Load referred instance from db and keep in memory
                 obj['obj'] = self.rel.to.objects.get(pk=obj['pk'])
@@ -60,8 +60,11 @@ class MongoDBM2MQuerySet(object):
         return obj['obj']
 
     def __iter__(self):
-        for obj in self.objects:
-            yield self._get_obj(obj)
+        for obj in list(self.objects):
+            #ignore obj of nowhere
+            obj_cached_or_loaded = self._get_obj(obj)
+            if not obj_cached_or_loaded is None:
+                yield obj_cached_or_loaded
 
     def __repr__(self):
         from . import REPR_OUTPUT_SIZE
@@ -106,6 +109,7 @@ class MongoDBM2MQuerySet(object):
         '''
         if klass is None:
             klass = self.__class__
+        #copy self.objects
         objects = list(self.objects)
         c = klass(rel=self.rel, model=self.model, objects=objects,
                   use_cached=True,
@@ -142,26 +146,30 @@ class MongoDBM2MValuesListQuerySet(MongoDBM2MQuerySet):
         '''
         iterator yield only fields requested
         '''
-        if self.flat and len(self._fields) == 1:
-            field = self._fields[0]
-            if field == 'pk':
-                for obj in self.objects:
-                    yield obj['pk']
+        for obj in list(self.objects):
+            obj_cached_or_loaded = self._get_obj(obj)
+            # skip when obj not in cached and db
+            if obj_cached_or_loaded is None:
+                pass
             else:
-                for obj in self.objects:
-                    if hasattr(obj, self._fields[0]):
-                        yield obj['obj'].__getattribute__(self._fields[0])
+                #force load for obj in cached with not 'pk', new added for example
+                if obj_cached_or_loaded.pk is None:
+                    obj_cached_or_loaded = self._get_obj(obj, force_load=True)
+                #behavior same as ValuesListQuerySet.iterator
+                if self.flat and len(self._fields) == 1:
+                    field = self._fields[0]
+                    if hasattr(obj['obj'], field):
+                        yield obj['obj'].__getattribute__(field)
                     else:
                         yield None
-        else:
-            for obj in self.objects():
-                row = list()
-                for field in self._fields:
-                    if hasattr(obj, field):
-                        row.append(obj['obj'].__getattribute__(field))
-                    else:
-                        row.append(None)
-                yield tuple(row)
+                else:
+                    row = list()
+                    for field in self._fields:
+                        if hasattr(obj['obj'], field):
+                            row.append(obj['obj'].__getattribute__(field))
+                        else:
+                            row.append(None)
+                    yield tuple(row)
 
     def __iter__(self):
         for item in self.iterator():

@@ -71,10 +71,13 @@ class MongoDBManyToManyFieldTest(TestCase):
         self.assertEqual(category4.testarticle_set.all().count(), 2)
         self.assertEqual(category4.testarticle_set.all()[0].title, 'test article 2')
         self.assertEqual(category4.testarticle_set.all()[1].title, 'test article 3')
-    
+
     def test_migrations(self):
         """
         Test migrating from an existing ListField(ForeignKey) field
+        Note: migrating is not directly supported with option embed=True
+        Workaround: ListField(ForeignKey) -> MongoDBManyToManyField(model)
+        -> MongoDBManyToManyField(model, embed=True)
         """
         # Create test categories
         category1 = TestCategory(title='test cat 1')
@@ -86,45 +89,81 @@ class MongoDBManyToManyFieldTest(TestCase):
         tag1.save()
         tag2 = TestTag(name='test tag 2')
         tag2.save()
-        
+
         # Create the old data - this model uses ListField(ForeignKey) fields
         class TestOldArticle(models.Model):
             class Meta:
                 # Used for testing migrations using same MongoDB collection
-                db_table = 'mongom2m_testapp_testarticle'
-            
+                db_table = TestArticle._meta.db_table
+
             objects = MongoDBManager()
             main_category = models.ForeignKey(TestCategory, related_name='main_oldarticles')
             categories = ListField(models.ForeignKey(TestCategory))
             tags = ListField(models.ForeignKey(TestTag))
             title = models.CharField(max_length=254)
             text = models.TextField()
-            
+
             def __unicode__(self):
                 return self.title
-        
+
         old_article = TestOldArticle(title='old article 1', text='old article text 1', main_category=category1, categories=[category1.id, category2.id], tags=[tag1.id, tag2.id])
         old_article.save()
 
-        # Now use the new model to access the old data.
-        new_article = TestArticle.objects.get(title='old article 1')
+        class TestTransferArticle(models.Model):
+            '''
+            with tags not embedded
+            '''
+            class Meta:
+                db_table = TestArticle._meta.db_table
+            objects = MongoDBManager()
+            main_category = models.ForeignKey(TestCategory, related_name='main_articles')
+            categories = MongoDBManyToManyField(TestCategory)
+            #without embed option
+            tags = MongoDBManyToManyField(TestTag, related_name='articles')
+            title = models.CharField(max_length=254)
+            text = models.TextField()
+
+            def __unicode__(self):
+                return self.title
+
+        # Now use the transfer model to access the old data.
+        new_article = TestTransferArticle.objects.get(title='old article 1')
 
         # Make sure the fields were loaded correctly
         self.assertEqual(set(cat.title for cat in new_article.categories.all()), set(('test cat 1', 'test cat 2')))
         self.assertEqual(set(cat.id for cat in new_article.categories.all()), set((category1.id, category2.id)))
         self.assertEqual(set(tag.name for tag in new_article.tags.all()), set(('test tag 1', 'test tag 2')))
         self.assertEqual(set(tag.id for tag in new_article.tags.all()), set((tag1.id, tag2.id)))
-        
+
         # Re-save and reload the data to migrate it in MongoDB
         new_article.save()
-        migrated_article = TestArticle.objects.get(title='old article 1')
-        
+        migrated_article = TestTransferArticle.objects.get(title='old article 1')
+
         # Make sure the fields are still loaded correctly
         self.assertEqual(set(cat.title for cat in migrated_article.categories.all()), set(('test cat 1', 'test cat 2')))
         self.assertEqual(set(cat.id for cat in migrated_article.categories.all()), set((category1.id, category2.id)))
         self.assertEqual(set(tag.name for tag in migrated_article.tags.all()), set(('test tag 1', 'test tag 2')))
         self.assertEqual(set(tag.id for tag in migrated_article.tags.all()), set((tag1.id, tag2.id)))
-    
+
+        # Now use the new model to access the old data.
+        new_article_final = TestArticle.objects.get(title='old article 1')
+
+        # Make sure the fields were loaded correctly
+        self.assertEqual(set(cat.title for cat in new_article_final.categories.all()), set(('test cat 1', 'test cat 2')))
+        self.assertEqual(set(cat.id for cat in new_article_final.categories.all()), set((category1.id, category2.id)))
+        self.assertEqual(set(tag.name for tag in new_article_final.tags.all()), set(('test tag 1', 'test tag 2')))
+        self.assertEqual(set(tag.id for tag in new_article_final.tags.all()), set((tag1.id, tag2.id)))
+
+        # Re-save and reload the data to migrate it in MongoDB
+        new_article_final.save()
+        migrated_article_final= TestArticle.objects.get(title='old article 1')
+
+        # Make sure the fields are still loaded correctly
+        self.assertEqual(set(cat.title for cat in migrated_article_final.categories.all()), set(('test cat 1', 'test cat 2')))
+        self.assertEqual(set(cat.id for cat in migrated_article_final.categories.all()), set((category1.id, category2.id)))
+        self.assertEqual(set(tag.name for tag in migrated_article_final.tags.all()), set(('test tag 1', 'test tag 2')))
+        self.assertEqual(set(tag.id for tag in migrated_article_final.tags.all()), set((tag1.id, tag2.id)))
+
     def test_embedded_migrations(self):
         """
         Test migrating from an existing ListField(EmbeddedModelField)
@@ -139,45 +178,45 @@ class MongoDBManyToManyFieldTest(TestCase):
         tag1.save()
         tag2 = TestTag(name='test tag 2')
         tag2.save()
-        
+
         # Create the old data - this model uses ListField(EmbeddedModelField) fields
         class TestOldEmbeddedArticle(models.Model):
             class Meta:
                 # Used for testing migrations using same MongoDB collection
-                db_table = 'mongom2m_testapp_testarticle'
-            
+                db_table = TestArticle._meta.db_table
+
             objects = MongoDBManager()
             main_category = models.ForeignKey(TestCategory, related_name='main_oldembeddedarticles')
             categories = ListField(EmbeddedModelField(TestCategory))
             tags = ListField(EmbeddedModelField(TestTag))
             title = models.CharField(max_length=254)
             text = models.TextField()
-            
+
             def __unicode__(self):
                 return self.title
-        
+
         old_article = TestOldEmbeddedArticle(title='old embedded article 1', text='old embedded article text 1', main_category=category1, categories=[category1, category2], tags=[tag1, tag2])
         old_article.save()
-        
+
         # Now use the new model to access the old data.
         new_article = TestArticle.objects.get(title='old embedded article 1')
-        
+
         # Make sure the fields were loaded correctly
         self.assertEqual(set(cat.title for cat in new_article.categories.all()), set(('test cat 1', 'test cat 2')))
         self.assertEqual(set(cat.id for cat in new_article.categories.all()), set((category1.id, category2.id)))
         self.assertEqual(set(tag.name for tag in new_article.tags.all()), set(('test tag 1', 'test tag 2')))
         self.assertEqual(set(tag.id for tag in new_article.tags.all()), set((tag1.id, tag2.id)))
-        
+
         # Re-save and reload the data to migrate it in MongoDB
         new_article.save()
         migrated_article = TestArticle.objects.get(title='old embedded article 1')
-        
+
         # Make sure the fields are still loaded correctly
         self.assertEqual(set(cat.title for cat in migrated_article.categories.all()), set(('test cat 1', 'test cat 2')))
         self.assertEqual(set(cat.id for cat in migrated_article.categories.all()), set((category1.id, category2.id)))
         self.assertEqual(set(tag.name for tag in migrated_article.tags.all()), set(('test tag 1', 'test tag 2')))
         self.assertEqual(set(tag.id for tag in migrated_article.tags.all()), set((tag1.id, tag2.id)))
-    
+
     def test_signals(self):
         """
         Test signals emitted by various M2M operations.
@@ -192,7 +231,7 @@ class MongoDBManyToManyFieldTest(TestCase):
         tag2 = TestTag(name='test tag 2')
         tag2.save()
         article = TestArticle(title='test article 1', text='test article 1 text', main_category=category1)
-        
+
         # Test pre_add / post_add
         self.on_add_called = 0
         def on_add(sender, instance, action, reverse, model, pk_set, *args, **kwargs):
@@ -213,7 +252,7 @@ class MongoDBManyToManyFieldTest(TestCase):
         article.categories.add(category1)
         self.assertEqual(self.on_add_called, 2)
         m2m_changed.disconnect(on_add)
-        
+
         # Test pre_remove / post_remove
         self.on_remove_called = 0
         def on_remove(sender, instance, action, reverse, model, pk_set, *args, **kwargs):
@@ -234,7 +273,7 @@ class MongoDBManyToManyFieldTest(TestCase):
         article.categories.remove(category1)
         self.assertEqual(self.on_remove_called, 2)
         m2m_changed.disconnect(on_remove)
-        
+
         # Test pre_clear / post_clear
         article.categories.add(category1)
         self.on_clear_called = 0
@@ -256,4 +295,3 @@ class MongoDBManyToManyFieldTest(TestCase):
         article.categories.clear()
         self.assertEqual(self.on_clear_called, 2)
         m2m_changed.disconnect(on_clear)
-        

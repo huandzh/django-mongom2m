@@ -1,4 +1,4 @@
-from django.db import models, router
+from django.db import models, router, connections
 from django.db.models import Q
 from django.utils.translation import ugettext_lazy as _
 from django_mongodb_engine.contrib import MongoDBManager
@@ -203,3 +203,14 @@ def combine_A(field, value):
         field = "%s.%s" % (field, value.op)
         value = value.val
     return A(field, value)
+
+def get_exists_ids(queryset):
+    '''
+    return a cursor return exists ids cached in m2mfield
+
+    :param queryset as MongoDBM2MQuerySet instance
+    '''
+    db = connections[router.db_for_write(queryset.model)]
+    conn = db.get_collection(queryset.rel.to._meta.db_table)
+    ids = [obj['pk'] for obj in queryset.objects]
+    return conn.find({"_id":{"$in":ids}},{"_id":1}).limit(queryset.count())

@@ -34,8 +34,8 @@ class MongoDBM2MQuerySet(object):
             self.objects = [{'pk': obj['pk'], 'obj': None}
                             for obj in self.objects]
 
-    def _get_obj(self, obj, force_load=False):
-        if force_load or (not obj.get('obj')):
+    def _get_obj(self, obj):
+        if not obj.get('obj'):
             try:
                 # Load referred instance from db and keep in memory
                 obj['obj'] = self.rel.to.objects.get(pk=obj['pk'])
@@ -152,9 +152,6 @@ class MongoDBM2MValuesListQuerySet(MongoDBM2MQuerySet):
             if obj_cached_or_loaded is None:
                 pass
             else:
-                #force load for obj in cached with not 'pk', new added for example
-                if obj_cached_or_loaded.pk is None:
-                    obj_cached_or_loaded = self._get_obj(obj, force_load=True)
                 #behavior same as ValuesListQuerySet.iterator
                 if self.flat and len(self._fields) == 1:
                     field = self._fields[0]

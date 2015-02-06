@@ -17,7 +17,6 @@ class MongoDBManyToManyFieldTest(TestCase):
         """
         Test general M2M functionality.
         """
-        import ipdb;ipdb.set_trace()
         # Create some sample data
         category1 = TestCategory(title='test cat 1')
         category1.save()
@@ -72,7 +71,6 @@ class MongoDBManyToManyFieldTest(TestCase):
         self.assertEqual(category4.testarticle_set.all().count(), 2)
         self.assertEqual(category4.testarticle_set.all()[0].title, 'test article 2')
         self.assertEqual(category4.testarticle_set.all()[1].title, 'test article 3')
-
         #tests on 'cascading' delete
         #del tag2
         new_tag2 = TestTag.objects.get(pk=tag2.pk)

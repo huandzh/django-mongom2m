@@ -10,7 +10,7 @@ except ImportError:
 
 from .query import MongoDBM2MQuerySet, MongoDBM2MQueryError
 from .utils import replace_Q, combine_A
-
+import warnings
 
 
 class MongoDBM2MReverseManager(object):
@@ -236,8 +236,9 @@ class MongoDBM2MRelatedManager(object):
         is enabled, returns embedded objects. Otherwise the query set
         will retrieve the objects from the database as needed.
         """
+        use_cached = kwargs.get('use_cached', True)
         return MongoDBM2MQuerySet(self.rel, self.rel.to, self.objects,
-                                  use_cached=True, **kwargs)
+                                  use_cached=use_cached, **kwargs)
 
     def ids(self):
         """
@@ -250,7 +251,11 @@ class MongoDBM2MRelatedManager(object):
         Return the actual related model objects, loaded fresh from
         the database. This won't use embedded objects even if they
         exist.
+
+        Depreciated by all(use_cached=False)
         """
+        warnings.warn('MongoDBM2MRelatedManager.objs depreciated by all(use_cached=False)',
+                      DeprecationWarning)
         return MongoDBM2MQuerySet(self.rel, self.rel.to, self.objects,
                                   use_cached=False)
 

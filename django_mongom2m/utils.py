@@ -204,13 +204,15 @@ def combine_A(field, value):
         value = value.val
     return A(field, value)
 
-def get_exists_ids(queryset):
+def get_exists_ids(model, rel, objects):
     '''
     return a cursor return exists ids cached in m2mfield
 
-    :param queryset as MongoDBM2MQuerySet instance
+    :param model: to determine db
+    :param rel: to determine table used for m2mfield
+    :param objects: objects for checking existence
     '''
-    db = connections[router.db_for_write(queryset.model)]
-    conn = db.get_collection(queryset.rel.to._meta.db_table)
-    ids = [obj['pk'] for obj in queryset.objects]
-    return conn.find({"_id":{"$in":ids}},{"_id":1}).limit(queryset.count())
+    db = connections[router.db_for_write(model)]
+    conn = db.get_collection(rel.to._meta.db_table)
+    ids = [obj['pk'] for obj in objects]
+    return conn.find({"_id":{"$in":ids}},{"_id":1}).limit(len(objects))

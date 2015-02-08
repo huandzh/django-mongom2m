@@ -71,13 +71,77 @@ class MongoDBManyToManyFieldTest(TestCase):
         self.assertEqual(category4.testarticle_set.all().count(), 2)
         self.assertEqual(category4.testarticle_set.all()[0].title, 'test article 2')
         self.assertEqual(category4.testarticle_set.all()[1].title, 'test article 3')
-        #tests on 'cascading' delete
+        #tests on delete
         #del tag2
         new_tag2 = TestTag.objects.get(pk=tag2.pk)
         new_tag2.delete()
+
         new_article2 = TestArticle.objects.get(pk=article2.pk)
+        # Verify that deleted tag still in all cached
+        self.assertIn(tag2, new_article2.tags.all())
+        # Verify that deleted tag not in all without cached
+        self.assertNotIn(tag2, new_article2.tags.all(use_cached=False))
+        # Verify that deleted tag not in .objs
+        self.assertNotIn(tag2, new_article2.tags.objs())
         new_article2.save()
-        
+        #Verify that all() and objs() dont change model in db
+        new_article2 = TestArticle.objects.get(pk=article2.pk)
+        # Verify that deleted tag still in all cached
+        self.assertIn(tag2, new_article2.tags.all())
+        # Verify that deleted tag not in all without cached
+        self.assertNotIn(tag2, new_article2.tags.all(use_cached=False))
+        # Verify that deleted tag not in .objs
+        self.assertNotIn(tag2, new_article2.tags.objs())
+
+        new_article2 = TestArticle.objects.get(pk=article2.pk)
+        new_article2.tags.reload_from_db()
+        new_article2.save()
+        new_article2 = TestArticle.objects.get(pk=article2.pk)
+        # Verify that deleted tag not in all cached
+        self.assertNotIn(tag2, new_article2.tags.all())
+        # Verify that deleted tag not in all without cached
+        self.assertNotIn(tag2, new_article2.tags.all(use_cached=False))
+        # Verify that deleted tag not in .objs
+        self.assertNotIn(tag2, new_article2.tags.objs())
+
+        #test change
+        #add back tag2
+        tag2.save()
+        new_article2 = TestArticle.objects.get(pk=article2.pk)
+        new_article2.tags.add(tag2)
+        new_article2.save()
+        #change tag2
+        new_tag2 = TestTag.objects.get(pk=tag2.pk)
+        new_tag2.name = 'new tag 2'
+        new_tag2.save()
+        new_tag2 = TestTag.objects.get(pk=tag2.pk)
+        new_article2 = TestArticle.objects.get(pk=article2.pk)
+        # Verify that old name still in all cached
+        self.assertEqual(tag2.name, new_article2.tags.all()[0].name)
+        # Verify that old name not in all without cached
+        self.assertNotEqual(tag2.name, new_article2.tags.all(use_cached=False)[0].name)
+        # Verify that new name in all without cached
+        self.assertEqual(new_tag2.name, new_article2.tags.all(use_cached=False)[0].name)
+        # Verify that new_name in .objs
+        self.assertEqual(new_tag2.name, new_article2.tags.objs()[0].name)
+        new_article2.save()
+
+        new_article2 = TestArticle.objects.get(pk=article2.pk)
+        new_article2.tags.reload_from_db()
+        new_article2.save()
+        new_article2 = TestArticle.objects.get(pk=article2.pk)
+        # Verify that old name not in all cached
+        self.assertNotEqual(tag2.name, new_article2.tags.all()[0].name)
+        # Verify that new name in all  cached
+        self.assertEqual(new_tag2.name, new_article2.tags.all()[0].name)
+        # Verify that new name in all without cached
+        self.assertEqual(new_tag2.name, new_article2.tags.all(use_cached=False)[0].name)
+        # Verify that new_name in .objs
+        self.assertEqual(new_tag2.name, new_article2.tags.objs()[0].name)
+
+
+
+
     def test_migrations(self):
         """
         Test migrating from an existing ListField(ForeignKey) field

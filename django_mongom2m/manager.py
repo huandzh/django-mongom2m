@@ -2,6 +2,8 @@
 from django.db import models, router
 from django.db.models import Q
 from django.db.models.signals import m2m_changed
+from .utils import get_exists_ids
+
 try:
     # ObjectId has been moved to bson.objectid in newer versions of PyMongo
     from bson.objectid import ObjectId
@@ -152,6 +154,24 @@ class MongoDBM2MRelatedManager(object):
         self.add(obj, auto_save=auto_save)
         return obj
 
+    def _remove_by_id_strings(self, removed_obj_ids):
+        '''
+        Remove specified objects by list of id strings
+        '''
+        # Send the pre_remove signal
+        m2m_changed.send(self.rel.through, instance=self.model_instance,
+                         action='pre_remove', reverse=False, model=self.rel.to,
+                         pk_set=removed_obj_ids)
+
+        # Commit the remove
+        self.objects = [obj for obj in self.objects if str(obj['pk']) not in removed_obj_ids]
+
+        # Send the post_remove signal
+        m2m_changed.send(self.rel.through, instance=self.model_instance,
+                         action='post_remove', reverse=False, model=self.rel.to,
+                         pk_set=removed_obj_ids)
+
+
     def remove(self, *objs, **kwargs):
         """
         Remove the specified object from the M2M field.
@@ -169,19 +189,39 @@ class MongoDBM2MRelatedManager(object):
 
         # Calculate list of object ids that will be removed
         removed_obj_ids = [str(obj['pk']) for obj in self.objects if obj['pk'] in obj_ids]
+        self._remove_by_id_strings(removed_obj_ids)
 
-        # Send the pre_remove signal
-        m2m_changed.send(self.rel.through, instance=self.model_instance,
-                         action='pre_remove', reverse=False, model=self.rel.to,
-                         pk_set=removed_obj_ids)
+        if auto_save:
+            self.model_instance.save()
 
-        # Commit the remove
-        self.objects = [obj for obj in self.objects if obj['pk'] not in obj_ids]
+    def remove_nonexists(self, **kwargs):
+        """
+        remove objects not exist in db
 
-        # Send the post_remove signal
-        m2m_changed.send(self.rel.through, instance=self.model_instance,
-                         action='post_remove', reverse=False, model=self.rel.to,
-                         pk_set=removed_obj_ids)
+        :param auto_save: See add() above for description
+        """
+        auto_save = kwargs.pop('auto_save', True)
+
+        exists_ids = [obj['_id'] for obj in get_exists_ids(self.model_instance, self.rel, self.objects)]
+        removed_obj_ids = [str(obj['pk']) for obj in self.objects if (not obj['pk'] in exists_ids)]
+        self._remove_by_id_strings(removed_obj_ids)
+
+        if auto_save:
+            self.model_instance.save()
+
+
+    def reload_from_db(self, **kwargs):
+        """
+        Reload all objs from db, and remove objs not exists
+
+        A short cut using all(use_cached=False),.
+        TODO: dev a more effiecient method
+        """
+        auto_save = kwargs.pop('auto_save', True)
+
+        all_objects_from_db = [obj for obj in self.all(use_cached=False)]
+        self.clear(auto_save=False)
+        self.add(*all_objects_from_db, auto_save=False)
 
         if auto_save:
             self.model_instance.save()
@@ -236,9 +276,8 @@ class MongoDBM2MRelatedManager(object):
         is enabled, returns embedded objects. Otherwise the query set
         will retrieve the objects from the database as needed.
         """
-        use_cached = kwargs.get('use_cached', True)
         return MongoDBM2MQuerySet(self.rel, self.rel.to, self.objects,
-                                  use_cached=use_cached, **kwargs)
+                                  **kwargs)
 
     def ids(self):
         """

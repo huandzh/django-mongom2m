@@ -1,5 +1,6 @@
 
 from django.db import router
+from .utils import get_exists_ids
 try:
     # ObjectId has been moved to bson.objectid in newer versions of PyMongo
     from bson.objectid import ObjectId
@@ -18,21 +19,32 @@ class MongoDBM2MQuerySet(object):
     Lazily loads non-embedded objects when iterated.
     If embed=False, objects are always loaded from database.
     """
-    def __init__(self, rel, model, objects, use_cached,
-                 appear_as_relationship=(None, None, None, None, None)):
+    def __init__(self, rel, model, objects,
+                 use_cached=True,
+                 appear_as_relationship=(None, None, None, None, None),
+                 **kwargs):
         self.db = router.db_for_read(rel.model if rel.model else rel.field.model)
         self.rel = rel
         self.objects = list(objects) # make a copy of the list to avoid problems
+
         self.model = model
         (self.appear_as_relationship_model, self.rel_model_instance,
                 self.rel_to_instance, self.rel_model_name, self.rel_to_name) = \
                     appear_as_relationship # appear as an intermediate m2m model
         if self.appear_as_relationship_model:
             self.model = self.appear_as_relationship_model
-        if not use_cached:
+        self.use_cached = use_cached
+        if not self.use_cached:
             # Reset any cached instances
             self.objects = [{'pk': obj['pk'], 'obj': None}
                             for obj in self.objects]
+        #whether clear none exists objs for potential trouble
+        self.exists_in_db_only = kwargs.get('exists_in_db_only', False)
+        if self.exists_in_db_only:
+            #using only objects stored in db
+            exists_ids = [obj['_id'] for obj in get_exists_ids(self.model, self.rel, self.objects)]
+            self.objects = [obj for obj in self.objects if obj['pk'] in exists_ids]
+
 
     def _get_obj(self, obj):
         if not obj.get('obj'):
@@ -40,9 +52,8 @@ class MongoDBM2MQuerySet(object):
                 # Load referred instance from db and keep in memory
                 obj['obj'] = self.rel.to.objects.get(pk=obj['pk'])
             except self.rel.to.DoesNotExist:
-                # cheap clean : throw away obj which is not in db
-                # Note : obj has a unique pk in the same mongodb instance
-                self.objects.remove(obj)
+                pass
+                # obj['obj'] will be None
         if self.appear_as_relationship_model:
             # Wrap us in a relationship class
             if self.rel_model_instance:
@@ -112,12 +123,12 @@ class MongoDBM2MQuerySet(object):
         #copy self.objects
         objects = list(self.objects)
         c = klass(rel=self.rel, model=self.model, objects=objects,
-                  use_cached=True,
+                  use_cached=self.use_cached,
                   appear_as_relationship=(
                       self.appear_as_relationship_model,
                       self.rel_model_instance,
                       self.rel_to_instance,
-                      self.rel_model_name, self.rel_to_name)
+                      self.rel_model_name, self.rel_to_name),
               )
         c.__dict__.update(kwargs)
         #no use for now
@@ -127,16 +138,20 @@ class MongoDBM2MQuerySet(object):
 
     def values_list(self, *fields, **kwargs):
         '''
-        required by django.contrib.admin
+        Emulate QuerySet.values_list required by django.contrib.admin
         '''
         flat = kwargs.pop('flat', False)
+        #required True for django.contrib.admin
+        exists_in_db_only = kwargs.pop('exists_in_db_only', self.exists_in_db_only)
         if kwargs:
             raise TypeError('Unexpected keyword arguments to values_list: %s'
                     % (list(kwargs),))
         if flat and len(fields) > 1:
             raise TypeError("'flat' is not valid when values_list is called with more than one field.")
-        return self._clone(klass=MongoDBM2MValuesListQuerySet, setup=True, flat=flat,
-                _fields=fields)
+        return self._clone(klass=MongoDBM2MValuesListQuerySet, setup=True,
+                           flat=flat,
+                           exists_in_db_only=exists_in_db_only,
+                           _fields=fields)
 
 class MongoDBM2MValuesListQuerySet(MongoDBM2MQuerySet):
     '''

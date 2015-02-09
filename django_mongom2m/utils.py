@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, router, connections
 from django.db.models import Q
 from django.utils.translation import ugettext_lazy as _
 from django_mongodb_engine.contrib import MongoDBManager
@@ -27,7 +27,8 @@ def create_through(field, model, to):
             self.model_instance = None
             self.related_manager = None
             self.to_instance = None
-            self.db = 'default'
+            #avoiding using backends other than django-mongodb-engine
+            self.db = router.db_for_write(self.model)
         def filter(self, *args, **kwargs):
             if model_module_name in kwargs:
                 # Relation, set up for querying by the model
@@ -45,6 +46,11 @@ def create_through(field, model, to):
             return self
         def exists(self, *args, **kwargs):
             return False
+        def none(self, *args, **kwargs):
+            if self.filter() != self:
+                return self.filter().none()
+            else:
+                return self
         def ordered(self, *args, **kwargs):
             return self
         def using(self, db, *args, **kwargs):
@@ -72,11 +78,27 @@ def create_through(field, model, to):
             # Normal key
             return None
         def __len__(self):
-            # Won't work, must be accessed through filter()
-            raise Exception('ThroughQuerySet relation unknown (__len__)')
+            '''
+            hack: return 0 if filter is not ready, else using filter().__len__
+            '''
+            if self.filter() != self:
+                return self.filter().__len__()
+            else:
+                return 0
         def __getitem__(self, key):
-            # Won't work, must be accessed through filter()
-            raise Exception('ThroughQuerySet relation unknown (__getitem__)')
+            '''
+            hack: admin site will try __getitem___ but only catch IndexError
+            raise IndexError if filter is not ready,
+            else using filter().__getitem___
+            '''
+            if self.filter() != self:
+                import ipdb;ipdb.set_trace()
+                return self.filter().__getitem__(key)
+            else:
+                # Won't work, must be accessed through filter()
+                # hack: raise as IndexError for admin
+                raise IndexError('ThroughQuerySet relation unknown (__getitem__)')
+
     class ThroughManager(MongoDBManager):
         def get_query_set(self):
             return ThroughQuerySet(self.model)
@@ -108,8 +130,9 @@ def create_through(field, model, to):
     Through.__name__ = obj_name
     Through._meta.app_label = model._meta.app_label
     Through._meta.object_name = obj_name
-    Through._meta.module_name = obj_name.lower()
-    Through._meta.db_table = Through._meta.app_label + '_' + Through._meta.module_name
+    #.model_name is used instead of .module_name since 1.6
+    Through._meta.model_name = obj_name.lower()
+    Through._meta.db_table = Through._meta.app_label + '_' + Through._meta.model_name
     Through._meta.verbose_name = _('%(model)s %(to)s relationship') % {'model':model._meta.verbose_name, 'to':to._meta.verbose_name}
     Through._meta.verbose_name_plural = _('%(model)s %(to)s relationships') % {'model':model._meta.verbose_name, 'to':to._meta.verbose_name}
     # Add new model to Django's model registry
@@ -180,3 +203,16 @@ def combine_A(field, value):
         field = "%s.%s" % (field, value.op)
         value = value.val
     return A(field, value)
+
+def get_exists_ids(model, rel, objects):
+    '''
+    return a cursor return exists ids cached in m2mfield
+
+    :param model: to determine db
+    :param rel: to determine table used for m2mfield
+    :param objects: objects for checking existence
+    '''
+    db = connections[router.db_for_write(model)]
+    conn = db.get_collection(rel.to._meta.db_table)
+    ids = [obj['pk'] for obj in objects]
+    return conn.find({"_id":{"$in":ids}},{"_id":1}).limit(len(objects))

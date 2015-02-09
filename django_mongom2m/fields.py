@@ -1,5 +1,5 @@
 from django.db import models
-from django.db.models.fields.related import add_lazy_relation
+from django.db.models.fields.related import add_lazy_relation, RelatedObject
 from django.db.models.query_utils import DeferredAttribute
 from django_mongodb_engine.query import A
 from djangotoolbox.fields import ListField, EmbeddedModelField
@@ -34,6 +34,8 @@ class MongoDBManyToManyField(models.ManyToManyField, ListField):
     category.article_set.all() - Returns all the articles that belong to the category
     """
     description = 'ManyToMany field with references and optional embedded objects'
+    generate_reverse_relation = False
+    requires_unique_target = False
     
     def __init__(self, to, related_name=None, embed=False, *args, **kwargs):
         # Call Field, not super, to skip Django's ManyToManyField extra stuff
@@ -69,7 +71,14 @@ class MongoDBManyToManyField(models.ManyToManyField, ListField):
         # admin/forms to work
         setattr(model, self.name,
                 MongoDBManyToManyRelationDescriptor(self, self.rel.through))
-    
+        #TODO: deprecated self.related used in django nonrel-1.6, remove later
+        other = self.rel.to
+        self.do_related_class(other, model)
+
+
+    def do_related_class(self, other, cls):
+        self.related = RelatedObject(other, cls, self)
+
     def contribute_to_class(self, model, name):
         self.__m2m_name = name
         # Call Field, not super, to skip Django's ManyToManyField extra stuff
@@ -105,6 +114,15 @@ class MongoDBManyToManyField(models.ManyToManyField, ListField):
 
     def pre_save(self, model_instance, add):
         return self.to_python(getattr(model_instance, self.attname))
+
+    #get_db_prep_save changed for ListField from djangotoolbox 1.6.2
+    #using Field.get_db_prep_save which is compitable
+    def get_db_prep_save(self, value, connection):
+        """
+        Returns field's value prepared for saving into a database.
+        """
+        return self.get_db_prep_value(value, connection=connection,
+                                      prepared=False)
 
     def get_db_prep_lookup(self, lookup_type, value, connection,
                            prepared=False):

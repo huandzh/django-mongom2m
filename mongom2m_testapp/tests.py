@@ -139,6 +139,18 @@ class MongoDBManyToManyFieldTest(TestCase):
         # Verify that new_name in .objs
         self.assertEqual(new_tag2.name, new_article2.tags.objs()[0].name)
 
+        #delete tag2
+        new_tag2 = TestTag.objects.get(pk=tag2.pk)
+        tag2 = TestTag.objects.get(pk=tag2.pk)
+        tag2.delete()
+        new_article2 = TestArticle.objects.get(pk=article2.pk)
+        # Verify tag2 still in cache
+        self.assertIn(new_tag2, new_article2.tags.all())
+        #remove nonexists
+        new_article2.tags.remove_nonexists()
+        new_article2.save()
+        # Verify tag2 removed from cache
+        self.assertNotIn(new_tag2, new_article2.tags.all())
 
 
 

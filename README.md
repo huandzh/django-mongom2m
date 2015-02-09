@@ -1,7 +1,8 @@
 Django MongoDB ManyToManyField Implementation
 =============================================
 
-Created in 2012 by Kenneth Falck, Modified/Extended by Merchant Atlas Inc. 2013
+Created in 2012 by Kenneth Falck, Modified/Extended by:
+* Merchant Atlas Inc. 2013
 
 Released under the standard BSD License (see below).
 
@@ -35,6 +36,7 @@ TabularInlines or filter\_horizontal and filter\_vertical to administer the many
 Don't be surprised, however, if some things don't work, because it's all emulated. There is no real
 "through" table in the database to provide the many-to-many association.
 
+Supported version: [django-nonrel-1.6](https://github.com/django-nonrel/django/tree/nonrel-1.6)
 
 Usage
 -----
@@ -45,11 +47,11 @@ Example model using a many-to-many field:
     from django.db import models
     from django_mongom2m.fields import MongoDBManyToManyField
     from django_mongodb_engine.contrib import MongoDBManager
-    
+
     class Category(models.Model):
         objects = MongoDBManager()
         title = models.CharField(max_length=254)
-    
+
     class Article(models.Model):
         objects = MongoDBManager()
         categories = MongoDBManyToManyField(Category)
@@ -67,7 +69,7 @@ To store categories in the field, you would first create the category and then a
 
     for cat in article.categories.all():
         print cat.title
-    
+
     for art in category.article_set.all():
         print art.title
 
@@ -106,6 +108,26 @@ Example:
     for article in Article.objects.all():
         article.save() # Re-saving will now embed the categories automatically
 
+### Query with or without cache
+To query with or without cache, just passing `use_cached=<True or False>` argument to supported query.
+
+Examples:
+
+    # return all instances in cache
+    article.categories.all(use_cached=False)
+	# return a list of ids
+	# to be compatible with admin site, values_list use `use_cached=False` by default
+	article.categories.values_list('pk', flat=True)
+
+### Refresh cache
+To remove instances already deleted by other other actions:
+
+    article.categories.remove_nonexists()
+
+To refresh cache and remove instances already deleted:
+
+    article.categories.reload_from_db()
+
 ### Advanced Querying (Embedded models)
 If you use `embed=True`, _MongoDBManyToManyField_ can do more than just query on 'pk'.
 You can do any of: get, filter, and exclude; while using Q objects and A objects
@@ -124,7 +146,7 @@ Note: The models have to be embedded because MongoDB doesn't support joins.
 There are some things that won't work with _MongoDBManyToManyField_:
 #### Chaining multiple filters or excludes together
 Under the covers, the initial filter is being called on the Article QuerySet, so what
-gets returned is an Article QuerySet. That means calling filter() again will not get 
+gets returned is an Article QuerySet. That means calling filter() again will not get
 any of the magic provided by _MongoDBManyToManyField_.
 
     # filter(title="hats").exclude(title="") will act on Article, not categories

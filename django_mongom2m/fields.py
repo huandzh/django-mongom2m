@@ -58,7 +58,9 @@ class MongoDBManyToManyField(models.ManyToManyField, ListField):
         self.default = MongoDBM2MRelatedManager(self, self.rel,
                                                 self._mm2m_embed)
         self.rel.model = model
-        self.rel.through = create_through(self, self.rel.model, self.rel.to)
+        # don't create `through` in abstact model
+        if not self.model._meta.abstract:
+            self.rel.through = create_through(self, self.rel.model, self.rel.to)
         # Determine related name automatically unless set
         if not self.rel.related_name:
             self.rel.related_name = model._meta.object_name.lower() + '_set'

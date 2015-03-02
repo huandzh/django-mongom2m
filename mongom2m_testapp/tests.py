@@ -58,7 +58,10 @@ class MongoDBManyToManyFieldTest(TestCase):
         self.assertEqual(new_article.main_category.title, 'test cat 1')
         self.assertEqual(new_article.categories.all()[0].title, 'test cat 2')
         self.assertEqual(new_article.categories.all()[1].title, 'test cat 3')
+        self.assertEqual(new_article.categories.all().filter(title='test cat 3')[0],category3)
         self.assertEqual(new_article.tags.all()[0].name, 'test tag 1')
+        self.assertEqual(new_article.tags.all().filter(name='test tag 2').count(),0)
+        self.assertEqual(new_article.tags.all().filter(name='test tag 1').count(),1)
         # Verify that the reverse relationship finds the article(s)
         self.assertEqual(tag1.articles.all().count(), 1)
         self.assertEqual(tag1.articles.all()[0].title, 'test article 1')
@@ -151,7 +154,7 @@ class MongoDBManyToManyFieldTest(TestCase):
         new_article2.save()
         # Verify tag2 removed from cache
         self.assertNotIn(new_tag2, new_article2.tags.all())
-
+        #import ipdb; ipdb.set_trace()
 
 
     def test_migrations(self):

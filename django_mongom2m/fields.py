@@ -89,10 +89,11 @@ class MongoDBManyToManyField(models.ManyToManyField, ListField):
         #don't contribute if abstract
         if not self.model._meta.abstract:
             #support formatting with app_label and class name
-            self._mm2m_related_name = self._mm2m_related_name % {
-                "app_label": self.model._meta.app_label,
-                "class": self.model._meta.model_name,
-            }
+            if not self._mm2m_related_name is None:
+                self._mm2m_related_name = self._mm2m_related_name % {
+                    "app_label": self.model._meta.app_label,
+                    "class": self.model._meta.model_name,
+                }
             # Do the rest after resolving the 'to' relation
             add_lazy_relation(model, self, self._mm2m_to_or_name,
                           self.contribute_after_resolving)

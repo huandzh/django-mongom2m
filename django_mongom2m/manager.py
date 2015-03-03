@@ -297,19 +297,19 @@ class MongoDBM2MRelatedManager(object):
             kwarg_value = kwargs.pop(kwarg, None)
             if not kwarg_value is None:
                 to_all_kwargs[kwarg] = kwarg_value
-        self.all(**to_all_kwargs).__getattribute__(method)(*args, **kwargs)
+        return self.all(**to_all_kwargs).__getattribute__(method)(*args, **kwargs)
 
     def filter(self, *args, **kwargs):
         '''
         return filtered queryset
         '''
-        self._queryset_function_helper('filter', *args, **kwargs)
+        return self._queryset_function_helper('filter', *args, **kwargs)
 
     def get(self, *args, **kwargs):
         '''
         return matched object
         '''
-        self._queryset_function_helper('get', *args, **kwargs)
+        return self._queryset_function_helper('get', *args, **kwargs)
 
     def ids(self):
         """

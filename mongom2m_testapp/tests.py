@@ -65,6 +65,9 @@ class MongoDBManyToManyFieldTest(TestCase):
         self.assertEqual(new_article.tags.all().filter(name='test tag 2').count(),0)
         self.assertEqual(new_article.tags.all().filter(name='test tag 1').count(),1)
         self.assertEqual(new_article.tags.all().get(name='test tag 1'),tag1)
+        self.assertEqual(new_article.tags.filter(name='test tag 2').count(),0)
+        self.assertEqual(new_article.tags.filter(name='test tag 1').count(),1)
+        self.assertEqual(new_article.tags.get(name='test tag 1'),tag1)
         with self.assertRaises(ObjectDoesNotExist):
             new_article.tags.get(name='test tag 2')
         with self.assertRaises(MultipleObjectsReturned):

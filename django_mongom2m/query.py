@@ -7,7 +7,7 @@ try:
 except ImportError:
     from pymongo.objectid import ObjectId
 import warnings
-
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 
 class MongoDBM2MQueryError(Exception): pass
 
@@ -104,7 +104,7 @@ class MongoDBM2MQuerySet(object):
         use_cached = kwargs.pop('use_cached', self.use_cached)
         if use_cached and self.rel.embed:
             #query using cached
-            warnings.warn('TODO: Not properly implemented for not embeded yet')
+            warnings.warn('TODO: Not properly implemented for embeded yet')
         pks = self.model.objects\
             .filter(pk__in=[obj['pk'] for obj in self.objects])\
             .filter(*args, **kwargs)\
@@ -119,6 +119,21 @@ class MongoDBM2MQuerySet(object):
             for obj in self.objects:
                 if pk == obj['pk']:
                     return self._get_obj(obj)
+        use_cached = kwargs.pop('use_cached', self.use_cached)
+        if use_cached and self.rel.embed:
+            #query using cached
+            warnings.warn('TODO: Not properly implemented for embeded yet')
+        try:
+            pk = self.model.objects\
+                           .filter(pk__in=[obj['pk'] for obj in self.objects])\
+                           .get(*args, **kwargs)\
+                           .pk
+            return self.get(pk=pk)
+        except self.model.DoesNotExist:
+            raise ObjectDoesNotExist('Not in MongoDBManyToManyField')
+        except self.model.MultipleObjectsReturned:
+            raise MultipleObjectsReturned(
+                'Multiple returned in MongoDBManyToManyField')
         return None
 
     def count(self):

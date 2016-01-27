@@ -5,6 +5,8 @@ from django_mongom2m.fields import MongoDBManyToManyField
 from django_mongodb_engine.contrib import MongoDBManager
 from djangotoolbox.fields import ListField, EmbeddedModelField
 from models import TestArticle, TestCategory, TestTag, TestAuthor, TestBook#, TestOldArticle, TestOldEmbeddedArticle
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
+
 try:
     # ObjectId has been moved to bson.objectid in newer versions of PyMongo
     from bson.objectid import ObjectId
@@ -58,7 +60,19 @@ class MongoDBManyToManyFieldTest(TestCase):
         self.assertEqual(new_article.main_category.title, 'test cat 1')
         self.assertEqual(new_article.categories.all()[0].title, 'test cat 2')
         self.assertEqual(new_article.categories.all()[1].title, 'test cat 3')
+        self.assertEqual(new_article.categories.all().filter(title='test cat 3')[0],category3)
+        self.assertEqual(new_article.categories.all().get(title='test cat 3'),category3)
         self.assertEqual(new_article.tags.all()[0].name, 'test tag 1')
+        self.assertEqual(new_article.tags.all().filter(name='test tag 2').count(),0)
+        self.assertEqual(new_article.tags.all().filter(name='test tag 1').count(),1)
+        self.assertEqual(new_article.tags.all().get(name='test tag 1'),tag1)
+        self.assertEqual(new_article.tags.filter(name='test tag 2').count(),0)
+        self.assertEqual(new_article.tags.filter(name='test tag 1').count(),1)
+        self.assertEqual(new_article.tags.get(name='test tag 1'),tag1)
+        with self.assertRaises(ObjectDoesNotExist):
+            new_article.tags.get(name='test tag 2')
+        with self.assertRaises(MultipleObjectsReturned):
+            new_article.categories.get(title__contains='cat')
         # Verify that the reverse relationship finds the article(s)
         self.assertEqual(tag1.articles.all().count(), 1)
         self.assertEqual(tag1.articles.all()[0].title, 'test article 1')
@@ -151,8 +165,6 @@ class MongoDBManyToManyFieldTest(TestCase):
         new_article2.save()
         # Verify tag2 removed from cache
         self.assertNotIn(new_tag2, new_article2.tags.all())
-
-
 
     def test_migrations(self):
         """

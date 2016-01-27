@@ -279,6 +279,38 @@ class MongoDBM2MRelatedManager(object):
         return MongoDBM2MQuerySet(self.rel, self.rel.to, self.objects,
                                   **kwargs)
 
+    def _queryset_function_helper(self, method, *args, **kwargs):
+        '''
+        apply non query args before call queryset method:
+        (See _MongoDBM2MQuerySet_)
+         * use_cached
+         * appear_as_relationship
+         * exists_in_db_only
+        '''
+        if not method in ['filter', 'get']:
+            raise NotImplementedError(
+                'Not implemented for calling queryset method %s' % method)
+        to_all_kwargs = dict()
+        for kwarg in ['use_cached',
+                      'appear_as_relationship',
+                      'exists_in_db_only']:
+            kwarg_value = kwargs.pop(kwarg, None)
+            if not kwarg_value is None:
+                to_all_kwargs[kwarg] = kwarg_value
+        return self.all(**to_all_kwargs).__getattribute__(method)(*args, **kwargs)
+
+    def filter(self, *args, **kwargs):
+        '''
+        return filtered queryset
+        '''
+        return self._queryset_function_helper('filter', *args, **kwargs)
+
+    def get(self, *args, **kwargs):
+        '''
+        return matched object
+        '''
+        return self._queryset_function_helper('get', *args, **kwargs)
+
     def ids(self):
         """
         Return a list of ObjectIds of all the related objects.

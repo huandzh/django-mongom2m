@@ -6,8 +6,8 @@ try:
     from bson.objectid import ObjectId
 except ImportError:
     from pymongo.objectid import ObjectId
-
-
+import warnings
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 
 class MongoDBM2MQueryError(Exception): pass
 
@@ -22,6 +22,7 @@ class MongoDBM2MQuerySet(object):
     def __init__(self, rel, model, objects,
                  use_cached=True,
                  appear_as_relationship=(None, None, None, None, None),
+                 exists_in_db_only=False,
                  **kwargs):
         self.db = router.db_for_read(rel.model if rel.model else rel.field.model)
         self.rel = rel
@@ -38,8 +39,8 @@ class MongoDBM2MQuerySet(object):
             # Reset any cached instances
             self.objects = [{'pk': obj['pk'], 'obj': None}
                             for obj in self.objects]
-        #whether clear none exists objs for potential trouble
-        self.exists_in_db_only = kwargs.get('exists_in_db_only', False)
+        #whether clear none exists objs for potential troubles
+        self.exists_in_db_only = exists_in_db_only
         if self.exists_in_db_only:
             #using only objects stored in db
             exists_ids = [obj['_id'] for obj in get_exists_ids(self.model, self.rel, self.objects)]
@@ -100,7 +101,17 @@ class MongoDBM2MQuerySet(object):
         return self
 
     def filter(self, *args, **kwargs):
-        return self
+        use_cached = kwargs.pop('use_cached', self.use_cached)
+        if use_cached and self.rel.embed:
+            #query using cached
+            warnings.warn('TODO: Not properly implemented for embeded yet')
+        pks = self.model.objects\
+            .filter(pk__in=[obj['pk'] for obj in self.objects])\
+            .filter(*args, **kwargs)\
+            .values_list('pk',flat=True)
+        self.objects = [obj for obj in self.objects if str(obj['pk']) in pks]
+        return self._clone(klass=MongoDBM2MQuerySet, setup=True)
+
 
     def get(self, *args, **kwargs):
         if 'pk' in kwargs:
@@ -108,6 +119,21 @@ class MongoDBM2MQuerySet(object):
             for obj in self.objects:
                 if pk == obj['pk']:
                     return self._get_obj(obj)
+        use_cached = kwargs.pop('use_cached', self.use_cached)
+        if use_cached and self.rel.embed:
+            #query using cached
+            warnings.warn('TODO: Not properly implemented for embeded yet')
+        try:
+            pk = self.model.objects\
+                           .filter(pk__in=[obj['pk'] for obj in self.objects])\
+                           .get(*args, **kwargs)\
+                           .pk
+            return self.get(pk=pk)
+        except self.model.DoesNotExist:
+            raise ObjectDoesNotExist('Not in MongoDBManyToManyField')
+        except self.model.MultipleObjectsReturned:
+            raise MultipleObjectsReturned(
+                'Multiple returned in MongoDBManyToManyField')
         return None
 
     def count(self):
@@ -129,12 +155,20 @@ class MongoDBM2MQuerySet(object):
                       self.rel_model_instance,
                       self.rel_to_instance,
                       self.rel_model_name, self.rel_to_name),
+                  exists_in_db_only=self.exists_in_db_only,
               )
         c.__dict__.update(kwargs)
         #no use for now
         if setup and hasattr(c, '_setup_query'):
             c._setup_query()
         return c
+
+    def all(self, **kwargs):
+        '''
+        return cloned queryset with optional kwargs
+        '''
+        return self._clone(klass=MongoDBM2MValuesListQuerySet, setup=True,
+                           **kwargs)
 
     def values_list(self, *fields, **kwargs):
         '''
